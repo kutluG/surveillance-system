@@ -2,3 +2,5 @@ fastapi
 uvicorn[standard]
 paho-mqtt
 confluent-kafka
+structlog
+prometheus_client

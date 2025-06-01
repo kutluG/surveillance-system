@@ -15,9 +15,9 @@ from shared.logging import get_logger
 from shared.metrics import instrument_app
 from shared.models import CameraEvent
 
-from ingest_service.database import SessionLocal, engine
-from ingest_service.models import Base, Event as DbEvent
-from ingest_service.weaviate_client import client as weaviate_client, init_schema
+from database import SessionLocal, engine
+from models import Base, Event as DbEvent
+from weaviate_client import client as weaviate_client, init_schema
 
 LOGGER = get_logger("ingest_service")
 app = FastAPI(title="Event Ingest Service")

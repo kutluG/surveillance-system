@@ -14,10 +14,10 @@ from shared.metrics import instrument_app
 from shared.auth import get_current_user, TokenData
 from shared.models import CameraEvent
 
-from rulegen_service.database import SessionLocal, engine
-from rulegen_service.models import Base, PolicyRule
-from rulegen_service.llm_client import generate_rule_structure
-from rulegen_service.rule_engine import get_triggered_actions
+from database import SessionLocal, engine
+from models import Base, PolicyRule
+from llm_client import generate_rule_structure
+from rule_engine import get_triggered_actions
 
 LOGGER = get_logger("rulegen_service")
 app = FastAPI(title="Rule Generation Service")

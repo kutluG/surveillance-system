@@ -2,3 +2,5 @@ fastapi
 uvicorn[standard]
 weaviate-client
 openai>=1.0.0
+structlog
+prometheus_client

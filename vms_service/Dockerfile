@@ -16,6 +16,8 @@ WORKDIR /app
 COPY vms_service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy shared module
+COPY shared/ /app/shared/
 COPY vms_service/ .
 
 ENV PYTHONUNBUFFERED=1

@@ -66,13 +66,25 @@ async def startup_event():
     kafka_producer = Producer({"bootstrap.servers": KAFKA_BROKER})
     # MQTT client
     bridge_client = mqtt.Client()
-    bridge_client.tls_set(
-        ca_certs=MQTT_TLS_CA,
-        certfile=MQTT_TLS_CERT,
-        keyfile=MQTT_TLS_KEY,
-        tls_version=ssl.PROTOCOL_TLSv1_2,
-    )
-    bridge_client.tls_insecure_set(False)
+    
+    # Only configure TLS if certificate files exist
+    if (os.path.exists(MQTT_TLS_CA) and 
+        os.path.exists(MQTT_TLS_CERT) and 
+        os.path.exists(MQTT_TLS_KEY)):
+        LOGGER.info("Configuring MQTT with TLS")
+        bridge_client.tls_set(
+            ca_certs=MQTT_TLS_CA,
+            certfile=MQTT_TLS_CERT,
+            keyfile=MQTT_TLS_KEY,
+            tls_version=ssl.PROTOCOL_TLSv1_2,
+        )
+        bridge_client.tls_insecure_set(False)
+    else:
+        LOGGER.warning("TLS certificates not found - connecting without TLS")
+        # Use non-secure port for testing
+        global MQTT_PORT
+        MQTT_PORT = int(os.getenv("MQTT_PORT_INSECURE", "1883"))
+    
     bridge_client.on_connect = on_connect
     bridge_client.on_message = on_message
     bridge_client.connect(MQTT_BROKER, MQTT_PORT)

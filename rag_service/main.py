@@ -9,8 +9,8 @@ from shared.logging import get_logger
 from shared.metrics import instrument_app
 from shared.models import Alert, SeverityLevel
 
-from rag_service.weaviate_client import semantic_search
-from rag_service.llm_client import generate_alert
+from weaviate_client import semantic_search
+from llm_client import generate_alert
 
 LOGGER = get_logger("rag_service")
 app = FastAPI(title="RAG Service")
