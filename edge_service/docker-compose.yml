@@ -1,0 +1,14 @@
+# (Excerpt showing only edge_service)
+services:
+  edge_service:
+    build:
+      context: .
+      dockerfile: edge_service/Dockerfile
+    env_file:
+      - .env
+    volumes:
+      - ./models:/models
+      - ./certs:/certs:ro
+    ports:
+      - "8000:8000"
+    depends_on: []
