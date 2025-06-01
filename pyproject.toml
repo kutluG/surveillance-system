@@ -1,0 +1,209 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "surveillance-system"
+version = "1.0.0"
+description = "AI-powered microservices surveillance system"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Surveillance System Team"},
+]
+keywords = ["surveillance", "ai", "computer-vision", "microservices"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Multimedia :: Video :: Capture",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.20.0",
+    "pydantic>=2.0.0",
+    "sqlalchemy>=2.0.0",
+    "alembic>=1.10.0",
+    "asyncpg>=0.28.0",
+    "redis>=4.5.0",
+    "kafka-python>=2.0.0",
+    "paho-mqtt>=1.6.0",
+    "weaviate-client>=3.20.0",
+    "openai>=1.0.0",
+    "opencv-python>=4.8.0",
+    "numpy>=1.24.0",
+    "Pillow>=10.0.0",
+    "prometheus-client>=0.16.0",
+    "structlog>=23.0.0",
+    "python-multipart>=0.0.6",
+    "httpx>=0.24.0",
+    "aiofiles>=23.0.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.11.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.4.0",
+    "pre-commit>=3.3.0",
+]
+test = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.11.0",
+    "httpx>=0.24.0",
+    "faker>=19.0.0",
+]
+docs = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.1.0",
+    "mkdocstrings[python]>=0.22.0",
+]
+production = [
+    "gunicorn>=20.1.0",
+    "sentry-sdk[fastapi]>=1.28.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/kutluG/surveillance-system"
+Repository = "https://github.com/kutluG/surveillance-system.git"
+Issues = "https://github.com/kutluG/surveillance-system/issues"
+Documentation = "https://github.com/kutluG/surveillance-system#readme"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["edge_service*", "ingest_service*", "rag_service*", "prompt_service*", "rulegen_service*", "notifier*", "vms_service*", "mqtt_kafka_bridge*", "shared*"]
+
+[tool.black]
+line-length = 88
+target-version = ['py38', 'py39', 'py310', 'py311']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+known_first_party = ["edge_service", "ingest_service", "rag_service", "prompt_service", "rulegen_service", "notifier", "vms_service", "mqtt_kafka_bridge", "shared"]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = [
+    "cv2.*",
+    "kafka.*",
+    "paho.*",
+    "weaviate.*",
+    "prometheus_client.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --strict-markers --strict-config"
+testpaths = [
+    "tests",
+    "integration_tests",
+    "edge_service/tests",
+    "ingest_service/tests", 
+    "rag_service/tests",
+    "prompt_service/tests",
+    "rulegen_service/tests",
+    "notifier/tests",
+    "vms_service/tests",
+    "mqtt_kafka_bridge/tests",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "load: marks tests as load tests",
+    "unit: marks tests as unit tests",
+    "e2e: marks tests as end-to-end tests",
+]
+asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.coverage.run]
+source = [
+    "edge_service",
+    "ingest_service", 
+    "rag_service",
+    "prompt_service",
+    "rulegen_service",
+    "notifier",
+    "vms_service",
+    "mqtt_kafka_bridge",
+    "shared",
+]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "*/__pycache__/*",
+    "*/venv/*",
+    "*/env/*",
+    "setup.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+show_missing = true
+precision = 2
+
+[tool.coverage.html]
+directory = "htmlcov"
