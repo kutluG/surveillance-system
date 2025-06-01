@@ -12,8 +12,8 @@ from shared.logging import get_logger
 from shared.metrics import instrument_app
 from shared.models import CameraEvent
 
-from vms_service.storage import get_storage
-from vms_service.clip_generator import ClipGenerator
+from storage import get_storage
+from clip_generator import ClipGenerator
 
 LOGGER = get_logger("vms_service")
 app = FastAPI(title="VMS Service")

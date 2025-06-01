@@ -4,3 +4,5 @@ opencv-python-headless
 boto3
 numpy
 pydantic
+structlog
+prometheus_client

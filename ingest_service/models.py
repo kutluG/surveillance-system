@@ -11,7 +11,7 @@ Base = declarative_base()
 
 class Event(Base):
     __tablename__ = "events"
-
+    
     id = Column(
         PgUUID(as_uuid=True),
         primary_key=True,
@@ -24,8 +24,8 @@ class Event(Base):
     event_type = Column(PgEnum(EventType, name="event_type"), nullable=False)
     detections = Column(JSON, nullable=True)
     activity = Column(String, nullable=True)
-    metadata = Column(JSON, nullable=True)
-
+    event_metadata = Column(JSON, nullable=True)
+    
     @classmethod
     def from_camera_event(cls, ev):
         """
@@ -38,5 +38,5 @@ class Event(Base):
             event_type=ev.event_type,
             detections=[d.dict() for d in ev.detections] if ev.detections else None,
             activity=ev.activity,
-            metadata=ev.metadata,
+            event_metadata=ev.metadata,
         )

@@ -9,8 +9,8 @@ from shared.logging import get_logger
 from shared.metrics import instrument_app
 from shared.models import QueryResult
 
-from prompt_service.weaviate_client import semantic_search
-from prompt_service.clip_store import get_clip_url
+from weaviate_client import semantic_search
+from clip_store import get_clip_url
 
 LOGGER = get_logger("prompt_service")
 app = FastAPI(title="Prompt Service")

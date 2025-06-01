@@ -11,9 +11,9 @@ from datetime import datetime
 from shared.logging import get_logger
 from shared.metrics import instrument_app
 
-from notifier.database import SessionLocal, engine
-from notifier.models import Base, NotificationLog, NotificationStatus
-from notifier.channels import CHANNELS
+from database import SessionLocal, engine
+from models import Base, NotificationLog, NotificationStatus
+from channels import CHANNELS
 
 LOGGER = get_logger("notifier")
 app = FastAPI(title="Notifier Service")
@@ -112,12 +112,11 @@ async def send_notification(
         raise HTTPException(status_code=400, detail=f"Unknown channel: {req.channel}")
     
     # Create notification log entry
-    log_entry = NotificationLog(
-        channel=req.channel,
+    log_entry = NotificationLog(        channel=req.channel,
         recipients=req.recipients,
         subject=req.subject,
         message=req.message,
-        metadata=req.metadata,
+        notification_metadata=req.metadata,
         status=NotificationStatus.PENDING,
         rule_id=req.rule_id,
     )

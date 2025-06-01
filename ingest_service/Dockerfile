@@ -10,6 +10,7 @@ WORKDIR /app
 COPY ingest_service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY shared/ /app/shared/
 COPY ingest_service/ .
 
 ENV PYTHONUNBUFFERED=1

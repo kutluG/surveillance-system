@@ -2,3 +2,5 @@ fastapi
 uvicorn[standard]
 weaviate-client
 pydantic
+structlog
+prometheus_client

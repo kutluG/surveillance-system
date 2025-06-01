@@ -9,6 +9,7 @@ WORKDIR /app
 COPY rag_service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY shared/ /app/shared/
 COPY rag_service/ .
 
 ENV PYTHONUNBUFFERED=1

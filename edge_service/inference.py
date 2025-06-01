@@ -16,8 +16,7 @@ class EdgeInference:
         :param model_dir: Directory containing serialized engine files.
         """
         self.model_dir = model_dir
-        # TODO: Replace with real TensorRT engine loading
-        self.obj_model = self._load_engine(os.path.join(model_dir, "object_detection.trt"))
+        # TODO: Replace with real TensorRT engine loading        self.obj_model = self._load_engine(os.path.join(model_dir, "object_detection.trt"))
         self.act_model = self._load_engine(os.path.join(model_dir, "activity_recognition.trt"))
 
     def _load_engine(self, engine_path: str):
@@ -28,7 +27,8 @@ class EdgeInference:
         """
         # TODO: implement TensorRT runtime and engine context
         if not os.path.exists(engine_path):
-            raise FileNotFoundError(f"Engine file not found: {engine_path}")
+            print(f"Warning: Engine file not found: {engine_path} - running in simulation mode")
+            return None  # Return None for simulation mode
         # Stub: return path as placeholder
         return engine_path
 

@@ -10,6 +10,7 @@ WORKDIR /app
 COPY notifier/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY shared/ /app/shared/
 COPY notifier/ .
 
 ENV PYTHONUNBUFFERED=1

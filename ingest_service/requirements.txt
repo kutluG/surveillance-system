@@ -4,3 +4,5 @@ confluent-kafka
 sqlalchemy
 psycopg2-binary
 weaviate-client
+structlog
+prometheus_client

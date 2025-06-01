@@ -24,13 +24,12 @@ class NotificationLog(Base):
         primary_key=True,
         default=uuid.uuid4,
         unique=True,
-        nullable=False,
-    )
+        nullable=False,    )
     channel = Column(String(50), nullable=False)
     recipients = Column(JSON, nullable=False)  # List of recipient addresses
     subject = Column(String(500), nullable=False)
     message = Column(Text, nullable=False)
-    metadata = Column(JSON, nullable=True)
+    notification_metadata = Column(JSON, nullable=True)
     status = Column(PgEnum(NotificationStatus, name="notification_status"), nullable=False)
     error_message = Column(Text, nullable=True)
     sent_at = Column(DateTime, nullable=True)

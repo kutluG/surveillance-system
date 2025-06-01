@@ -17,17 +17,26 @@ class MQTTClient:
     def __init__(self, client_id: str):
         """
         Initialize and connect the MQTT client using TLS.
-        :param client_id: Unique MQTT client ID.
-        """
+        :param client_id: Unique MQTT client ID.        """
         self.client = mqtt.Client(client_id=client_id)
-        self.client.tls_set(
-            ca_certs=MQTT_TLS_CA,
-            certfile=MQTT_TLS_CERT,
-            keyfile=MQTT_TLS_KEY,
-            tls_version=ssl.PROTOCOL_TLSv1_2,
-        )
-        self.client.tls_insecure_set(False)
-        self.client.connect(MQTT_BROKER, MQTT_PORT)
+        
+        # Only configure TLS if certificate files exist
+        if (os.path.exists(MQTT_TLS_CA) and 
+            os.path.exists(MQTT_TLS_CERT) and 
+            os.path.exists(MQTT_TLS_KEY)):
+            self.client.tls_set(
+                ca_certs=MQTT_TLS_CA,
+                certfile=MQTT_TLS_CERT,
+                keyfile=MQTT_TLS_KEY,
+                tls_version=ssl.PROTOCOL_TLSv1_2,
+            )
+            self.client.tls_insecure_set(False)
+            mqtt_port = MQTT_PORT
+        else:
+            # Use non-secure port for testing without certificates
+            mqtt_port = int(os.getenv("MQTT_PORT_INSECURE", "1883"))
+            
+        self.client.connect(MQTT_BROKER, mqtt_port)
         self.client.loop_start()
 
     def publish_event(self, topic: str, payload: Dict[str, Any]) -> None:

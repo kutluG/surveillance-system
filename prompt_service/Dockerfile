@@ -9,6 +9,7 @@ WORKDIR /app
 COPY prompt_service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY shared/ /app/shared/
 COPY prompt_service/ .
 
 ENV PYTHONUNBUFFERED=1
