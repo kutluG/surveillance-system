@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+confluent-kafka
+sqlalchemy
+psycopg2-binary
+weaviate-client
