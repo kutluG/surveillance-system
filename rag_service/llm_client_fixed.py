@@ -8,7 +8,7 @@ from openai import OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4")
 
-# Initialize OpenAI client with the modern API
+# Initialize OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 SYSTEM_PROMPT = (
@@ -35,16 +35,17 @@ def generate_alert(query: str, contexts: list[dict]) -> dict:
             f"cam={ctx.get('camera_id')}, "
             f"type={ctx.get('event_type')}"
         )
+    
     user_content = (
         f"User Query: {query}\n\n"
         f"Relevant Context Events:\n" + "\n".join(ctx_lines)
     )
+    
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
     
-    # Use the modern OpenAI client API
     resp = client.chat.completions.create(
         model=OPENAI_MODEL,
         messages=messages,
