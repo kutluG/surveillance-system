@@ -1,0 +1,58 @@
+{
+  "preset": "react-native",
+  "testEnvironment": "node",
+  "setupFilesAfterEnv": [
+    "<rootDir>/src/test/setup.js"
+  ],
+  "moduleFileExtensions": [
+    "ts",
+    "tsx",
+    "js",
+    "jsx",
+    "json",
+    "node"
+  ],
+  "transform": {
+    "^.+\\.(js|jsx|ts|tsx)$": "babel-jest"
+  },
+  "transformIgnorePatterns": [
+    "node_modules/(?!(react-native|@react-native|react-native-vector-icons|react-native-reanimated|react-native-gesture-handler|react-native-screens|react-navigation|@react-navigation|react-native-safe-area-context|react-native-biometrics|react-native-video|@react-native-firebase|react-native-push-notification|@react-native-notifee|react-native-background-job|react-native-sensors)/)"
+  ],
+  "testPathIgnorePatterns": [
+    "<rootDir>/node_modules/",
+    "<rootDir>/android/",
+    "<rootDir>/ios/"
+  ],
+  "coverageDirectory": "coverage",
+  "collectCoverageFrom": [
+    "src/**/*.{js,jsx,ts,tsx}",
+    "!src/**/*.test.{js,jsx,ts,tsx}",
+    "!src/**/__tests__/**",
+    "!src/test/**",
+    "!src/index.js",
+    "!src/App.js"
+  ],
+  "coverageThreshold": {
+    "global": {
+      "branches": 70,
+      "functions": 70,
+      "lines": 70,
+      "statements": 70
+    }
+  },
+  "moduleNameMapping": {
+    "^@/(.*)$": "<rootDir>/src/$1",
+    "^@components/(.*)$": "<rootDir>/src/components/$1",
+    "^@screens/(.*)$": "<rootDir>/src/screens/$1",
+    "^@services/(.*)$": "<rootDir>/src/services/$1",
+    "^@utils/(.*)$": "<rootDir>/src/utils/$1",
+    "^@constants/(.*)$": "<rootDir>/src/constants/$1",
+    "^@store/(.*)$": "<rootDir>/src/store/$1",
+    "^@contexts/(.*)$": "<rootDir>/src/contexts/$1"
+  },
+  "testMatch": [
+    "<rootDir>/src/**/__tests__/**/*.{js,jsx,ts,tsx}",
+    "<rootDir>/src/**/*.test.{js,jsx,ts,tsx}"
+  ],
+  "verbose": true
+}

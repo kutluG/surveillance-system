@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Surveillance AI</string>
+    <string name="app_description">AI-powered surveillance monitoring system</string>
+    <string name="notification_channel_id">surveillance_alerts</string>
+    <string name="notification_channel_name">Surveillance Alerts</string>
+    <string name="notification_channel_description">Critical security alerts and camera notifications</string>
+    
+    <!-- Firebase Cloud Messaging -->
+    <string name="default_notification_channel_id">surveillance_default</string>
+    
+    <!-- Biometric authentication -->
+    <string name="biometric_prompt_title">Authenticate</string>
+    <string name="biometric_prompt_subtitle">Use your fingerprint or face to access the app</string>
+    <string name="biometric_prompt_negative_text">Cancel</string>
+    
+    <!-- Error messages -->
+    <string name="error_network">Network connection error</string>
+    <string name="error_authentication">Authentication failed</string>
+    <string name="error_camera">Camera access error</string>
+    <string name="error_generic">An error occurred. Please try again.</string>
+    
+    <!-- Permission requests -->
+    <string name="permission_camera_title">Camera Permission</string>
+    <string name="permission_camera_message">This app needs camera access to view surveillance feeds</string>
+    <string name="permission_location_title">Location Permission</string>
+    <string name="permission_location_message">This app needs location access for geo-tagged alerts</string>
+    <string name="permission_storage_title">Storage Permission</string>
+    <string name="permission_storage_message">This app needs storage access to save recordings</string>
+</resources>
