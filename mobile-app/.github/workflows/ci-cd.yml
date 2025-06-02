@@ -1,0 +1,351 @@
+name: 📱 Surveillance AI Mobile CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  NODE_VERSION: '18'
+  JAVA_VERSION: '11'
+  RUBY_VERSION: '3.0'
+
+jobs:
+  # Code Quality & Testing
+  quality-check:
+    name: 🔍 Code Quality & Testing
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📥 Install dependencies
+        run: npm ci
+
+      - name: 🔧 Pre-build validation
+        run: node scripts/validate-build.js
+
+      - name: 🧹 Lint code
+        run: npm run lint
+
+      - name: 🧪 Run unit tests
+        run: npm run test:coverage
+
+      - name: 🧪 Run integration tests
+        run: npm run test:integration
+
+      - name: 📊 Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/lcov.info
+          flags: unittests
+          name: codecov-umbrella
+
+      - name: 📈 SonarQube Scan
+        uses: sonarqube-quality-gate-action@master
+        if: github.event_name == 'push'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # Android Build & Test
+  android-build:
+    name: 🤖 Android Build
+    runs-on: ubuntu-latest
+    needs: quality-check
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: ☕ Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: 🎯 Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 📥 Install dependencies
+        run: npm ci
+
+      - name: 🔧 Setup Gradle cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: 🔐 Decode debug keystore
+        run: |
+          echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | base64 --decode > android/app/debug.keystore
+
+      - name: 🏗️ Build debug APK
+        run: |
+          cd android
+          ./gradlew assembleDebug
+
+      - name: 🏗️ Build release APK (if tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          cd android
+          ./gradlew assembleRelease
+        env:
+          SURVEILLANCE_UPLOAD_STORE_FILE: ${{ secrets.ANDROID_KEYSTORE_FILE }}
+          SURVEILLANCE_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SURVEILLANCE_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SURVEILLANCE_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: 📦 Upload debug APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: android-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: 📦 Upload release APK
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v3
+        with:
+          name: android-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+
+  # iOS Build & Test
+  ios-build:
+    name: 🍎 iOS Build
+    runs-on: macos-latest
+    needs: quality-check
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 💎 Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+
+      - name: 📥 Install dependencies
+        run: npm ci
+
+      - name: 🔧 Setup CocoaPods cache
+        uses: actions/cache@v3
+        with:
+          path: ios/Pods
+          key: ${{ runner.os }}-pods-${{ hashFiles('ios/Podfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pods-
+
+      - name: 📦 Install CocoaPods
+        run: |
+          cd ios
+          pod install
+
+      - name: 🏗️ Build iOS app (Debug)
+        run: |
+          xcodebuild build \
+            -workspace ios/SurveillanceApp.xcworkspace \
+            -scheme SurveillanceApp \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator'
+
+      - name: 🏗️ Build iOS archive (Release)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          xcodebuild archive \
+            -workspace ios/SurveillanceApp.xcworkspace \
+            -scheme SurveillanceApp \
+            -configuration Release \
+            -archivePath ios/build/SurveillanceApp.xcarchive \
+            -allowProvisioningUpdates
+        env:
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+
+      - name: 📦 Export IPA
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath ios/build/SurveillanceApp.xcarchive \
+            -exportPath ios/build \
+            -exportOptionsPlist ios/ExportOptions.plist
+
+      - name: 📦 Upload iOS build
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v3
+        with:
+          name: ios-release-ipa
+          path: ios/build/SurveillanceApp.ipa
+
+  # E2E Testing
+  e2e-tests:
+    name: 🧪 E2E Tests
+    runs-on: macos-latest
+    needs: [android-build, ios-build]
+    strategy:
+      matrix:
+        platform: [android, ios]
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📥 Install dependencies
+        run: npm ci
+
+      - name: 🔧 Setup Detox
+        run: |
+          npm install -g detox-cli
+          detox build --configuration ${{ matrix.platform }}.release
+
+      - name: 🧪 Run E2E tests
+        run: detox test --configuration ${{ matrix.platform }}.release --headless
+
+      - name: 📦 Upload E2E test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: e2e-test-results-${{ matrix.platform }}
+          path: |
+            e2e/screenshots/
+            e2e/videos/
+
+  # Security Scanning
+  security-scan:
+    name: 🔒 Security Scanning
+    runs-on: ubuntu-latest
+    needs: quality-check
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔍 Run dependency vulnerability scan
+        uses: securecodewarrior/github-action-add-sarif@v1
+        with:
+          sarif-file: 'dependency-scan-results.sarif'
+
+      - name: 🔐 Run CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
+        with:
+          languages: javascript
+
+  # Release Deployment
+  deploy-release:
+    name: 🚀 Deploy Release
+    runs-on: ubuntu-latest
+    needs: [android-build, ios-build, e2e-tests, security-scan]
+    if: startsWith(github.ref, 'refs/tags/')
+    environment: production
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📥 Download Android APK
+        uses: actions/download-artifact@v3
+        with:
+          name: android-release-apk
+          path: ./releases/android/
+
+      - name: 📥 Download iOS IPA
+        uses: actions/download-artifact@v3
+        with:
+          name: ios-release-ipa
+          path: ./releases/ios/
+
+      - name: 🤖 Deploy to Google Play
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT }}
+          packageName: com.surveillanceapp
+          releaseFiles: ./releases/android/app-release.apk
+          track: production
+          status: completed
+
+      - name: 🍎 Deploy to App Store
+        uses: apple-actions/upload-testflight-build@v1
+        with:
+          app-path: ./releases/ios/SurveillanceApp.ipa
+          issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+
+      - name: 📝 Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            ./releases/android/app-release.apk
+            ./releases/ios/SurveillanceApp.ipa
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+
+  # Notification
+  notify:
+    name: 📢 Notify Team
+    runs-on: ubuntu-latest
+    needs: [deploy-release]
+    if: always()
+    steps:
+      - name: 📧 Send Slack notification
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#surveillance-ai-mobile'
+          text: |
+            🚀 Mobile app deployment completed!
+            📱 Version: ${{ github.ref_name }}
+            ✅ Status: ${{ job.status }}
+            🔗 Release: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: 📧 Send email notification
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "🚀 Surveillance AI Mobile - Release ${{ github.ref_name }}"
+          to: team@surveillance-ai.com
+          from: ci-cd@surveillance-ai.com
+          body: |
+            The Surveillance AI mobile app has been successfully deployed!
+            
+            📱 Version: ${{ github.ref_name }}
+            🗓️ Date: ${{ github.event.head_commit.timestamp }}
+            👤 Author: ${{ github.event.head_commit.author.name }}
+            
+            📦 Release Notes:
+            ${{ github.event.head_commit.message }}
+            
+            🔗 View Release: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+            
+            ---
+            Automated CI/CD Pipeline

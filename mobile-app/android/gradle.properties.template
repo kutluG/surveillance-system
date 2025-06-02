@@ -1,0 +1,24 @@
+# Release keystore configuration
+# Copy this file to gradle.properties and fill in your actual keystore details
+
+# Keystore path (relative to android/app/ directory)
+SURVEILLANCE_UPLOAD_STORE_FILE=surveillance-release-key.keystore
+
+# Keystore password
+SURVEILLANCE_UPLOAD_STORE_PASSWORD=your_keystore_password
+
+# Key alias
+SURVEILLANCE_UPLOAD_KEY_ALIAS=surveillance-key-alias
+
+# Key password
+SURVEILLANCE_UPLOAD_KEY_PASSWORD=your_key_password
+
+# Example to generate a release keystore:
+# keytool -genkey -v -keystore surveillance-release-key.keystore -alias surveillance-key-alias -keyalg RSA -keysize 2048 -validity 10000
+
+# Instructions:
+# 1. Generate a keystore using the keytool command above
+# 2. Place the keystore file in android/app/ directory
+# 3. Copy this file to android/gradle.properties
+# 4. Update the values with your actual keystore details
+# 5. Add gradle.properties to .gitignore to keep credentials secure
