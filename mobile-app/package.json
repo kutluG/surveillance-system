@@ -35,7 +35,7 @@
     "release:all": "npm run prerelease && npm run deploy:android && npm run deploy:ios"
   },
   "dependencies": {
-    "react": "18.2.0",
+    "react": "19.1.0",
     "react-native": "0.73.2",
     "react-native-vector-icons": "^10.0.3",
     "react-navigation": "^6.0.17",
