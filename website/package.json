@@ -4,7 +4,7 @@
   "description": "AI-Powered Surveillance System - Modern Web Interface",
   "private": true,
   "dependencies": {
-    "@headlessui/react": "^1.7.15",
+    "@headlessui/react": "^2.2.4",
     "@heroicons/react": "^2.0.18",
     "@testing-library/jest-dom": "^5.16.4",
     "@testing-library/react": "^13.3.0",
