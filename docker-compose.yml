@@ -107,6 +107,31 @@ services:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+  # =============================================================================
+  # API GATEWAY
+  # =============================================================================
+
+  api_gateway:
+    build:
+      context: .
+      dockerfile: api_gateway/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - enhanced_prompt_service
+      - websocket_service
+      - agent_orchestrator
+      - rule_builder_service
+      - advanced_rag_service
+      - ai_dashboard_service
+      - voice_interface_service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   # =============================================================================
   # APPLICATION SERVICES
@@ -231,7 +256,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-
   vms_service:
     build:
       context: .
@@ -242,6 +266,126 @@ services:
       - "8008:8000"
     volumes:
       - ./data/clips:/data/clips
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # =============================================================================
+  # ENHANCED AI SERVICES
+  # =============================================================================
+
+  enhanced_prompt_service:
+    build:
+      context: .
+      dockerfile: enhanced_prompt_service/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8009:8000"
+    depends_on:
+      - redis
+      - weaviate
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  websocket_service:
+    build:
+      context: .
+      dockerfile: websocket_service/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8010:8000"
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  agent_orchestrator:
+    build:
+      context: .
+      dockerfile: agent_orchestrator/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8011:8000"
+    depends_on:
+      - redis
+      - postgres
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  rule_builder_service:
+    build:
+      context: .
+      dockerfile: rule_builder_service/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8012:8000"
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  advanced_rag_service:
+    build:
+      context: .
+      dockerfile: advanced_rag_service/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8013:8000"
+    depends_on:
+      - weaviate
+      - postgres
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  ai_dashboard_service:
+    build:
+      context: .
+      dockerfile: ai_dashboard_service/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8014:8000"  
+    depends_on:
+      - postgres
+      - weaviate
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  voice_interface_service:
+    build:
+      context: .
+      dockerfile: voice_interface_service/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8015:8000"
+    depends_on:
+      - websocket_service
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s

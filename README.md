@@ -51,17 +51,22 @@ git clone <repository-url>
 cd surveillance-system
 ```
 
-2. Set up the development environment:
+2. Configure environment variables:
+```bash
+cp .env.example .env
+```
+
+3. Set up the development environment:
 ```bash
 ./scripts/setup-dev.sh
 ```
 
-3. Start the system:
+4. Start the system:
 ```bash
 ./scripts/start-system.sh
 ```
 
-4. Stop the system:
+5. Stop the system:
 ```bash
 ./scripts/stop-system.sh
 ```
@@ -120,6 +125,21 @@ Configuration files are located in each service directory. Key configuration inc
 - AI model configurations
 - Notification channels
 - Monitoring thresholds
+
+# Environment Variables and Secrets
+Before running the system, copy the example file and configure your secrets:
+
+```bash
+cp .env.example .env  # or copy in PowerShell: Copy-Item .env.example .env
+# Then edit .env and set values for:
+# - DATABASE_URL or POSTGRES_* variables
+# - REDIS_URL
+# - KAFKA_BROKER and related Kafka settings
+# - OPENAI_API_KEY and other AI credentials
+# - JWT_SECRET_KEY, SMTP_USERNAME/PASSWORD, AWS credentials, etc.
+```
+
+Ensure that the `.env` file is listed in `.gitignore` so secrets are not committed.
 
 ## Monitoring
 

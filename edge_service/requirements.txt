@@ -27,3 +27,12 @@ requests==2.31.0
 
 # Additional utilities
 python-multipart==0.0.6
+
+# Shared package
+-e ../shared
+
+# Observability dependencies
+opentelemetry-api>=1.20.0
+opentelemetry-sdk>=1.20.0
+opentelemetry-instrumentation-fastapi>=0.40b0
+opentelemetry-exporter-otlp>=1.20.0

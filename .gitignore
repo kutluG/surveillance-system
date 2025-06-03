@@ -77,10 +77,10 @@ logs/
 *.sqlite
 *.sqlite3
 
-# Configuration files with secrets
+# Secrets and local configs
+.env
+.env.*
 config.local.py
-.env.local
-.env.production
 secrets.yml
 secrets.yaml
 

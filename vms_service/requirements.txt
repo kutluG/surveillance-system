@@ -6,3 +6,4 @@ numpy
 pydantic
 structlog
 prometheus_client
+-e ../shared

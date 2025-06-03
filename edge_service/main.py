@@ -11,8 +11,13 @@ from shared.models import CameraEvent, EventType, Detection
 from preprocessing import resize_letterbox, normalize_image
 from inference import EdgeInference
 from mqtt_client import MQTTClient
+from shared.tracing import configure_tracing
 
 LOGGER = get_logger("edge_service")
+
+# Configure tracing before app initialization
+configure_tracing("edge_service")
+
 app = FastAPI(title="Edge AI Service")
 instrument_app(app, service_name="edge_service")
 
