@@ -1,0 +1,28 @@
+version: 2
+updates:
+  # Python dependencies
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # Node dependencies for mobile-app
+  - package-ecosystem: "npm"
+    directory: "/mobile-app"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # Node dependencies for website
+  - package-ecosystem: "npm"
+    directory: "/website"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # GitHub Actions workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
