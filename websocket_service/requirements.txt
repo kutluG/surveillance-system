@@ -1,7 +1,7 @@
 pip-requirements
 -e ../shared
 fastapi==0.104.1
-uvicorn[standard]==0.24.0
+uvicorn[standard]==0.34.3
 redis==5.0.1
 asyncio-mqtt==0.16.1
 httpx==0.25.2
