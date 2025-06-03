@@ -1,6 +1,6 @@
 # Core web framework and ASGI server
 fastapi==0.104.1
-uvicorn[standard]==0.24.0
+uvicorn[standard]==0.34.3
 
 # Computer vision and image processing
 opencv-python==4.8.1.78
