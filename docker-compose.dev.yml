@@ -1,0 +1,171 @@
+# Docker Compose Override for Development
+# Bu dosya geliştirme ortamında ek yapılandırmalar sağlar
+# docker-compose.override.yml olarak kullanılabilir
+
+version: '3.8'
+
+services:
+  # API Gateway - Development overrides
+  api_gateway:
+    volumes:
+      - ./api_gateway:/app
+      - ./shared:/app/shared
+    environment:
+      - DEBUG=true
+      - RELOAD=true
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    
+  # Edge Service - Development overrides  
+  edge_service:
+    volumes:
+      - ./edge_service:/app
+      - ./shared:/app/shared
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+    
+  # VMS Service - Development overrides
+  vms_service:
+    volumes:
+      - ./vms_service:/app
+      - ./shared:/app/shared
+      - ./data/clips:/app/clips
+    environment:
+      - DEBUG=true
+      
+  # Ingest Service - Development overrides
+  ingest_service:
+    volumes:
+      - ./ingest_service:/app
+      - ./shared:/app/shared
+    environment:
+      - DEBUG=true
+      
+  # Prompt Service - Development overrides
+  prompt_service:
+    volumes:
+      - ./prompt_service:/app
+      - ./shared:/app/shared
+    environment:
+      - DEBUG=true
+      
+  # Enhanced Prompt Service - Development overrides
+  enhanced_prompt_service:
+    volumes:
+      - ./enhanced_prompt_service:/app
+      - ./shared:/app/shared
+    environment:
+      - DEBUG=true
+      
+  # RAG Service - Development overrides
+  rag_service:
+    volumes:
+      - ./rag_service:/app
+      - ./shared:/app/shared
+    environment:
+      - DEBUG=true
+      
+  # Advanced RAG Service - Development overrides
+  advanced_rag_service:
+    volumes:
+      - ./advanced_rag_service:/app
+      - ./shared:/app/shared
+    environment:
+      - DEBUG=true
+      
+  # Rule Builder Service - Development overrides
+  rule_builder_service:
+    volumes:
+      - ./rule_builder_service:/app
+      - ./shared:/app/shared
+    environment:
+      - DEBUG=true
+      
+  # Notifier - Development overrides
+  notifier:
+    volumes:
+      - ./notifier:/app
+      - ./shared:/app/shared
+    environment:
+      - DEBUG=true
+      
+  # MQTT Kafka Bridge - Development overrides
+  mqtt_kafka_bridge:
+    volumes:
+      - ./mqtt_kafka_bridge:/app
+      - ./shared:/app/shared
+    environment:
+      - DEBUG=true
+      
+  # WebSocket Service - Development overrides
+  websocket_service:
+    volumes:
+      - ./websocket_service:/app
+      - ./shared:/app/shared
+    environment:
+      - DEBUG=true
+      
+  # Voice Interface Service - Development overrides
+  voice_interface_service:
+    volumes:
+      - ./voice_interface_service:/app
+      - ./shared:/app/shared
+    environment:
+      - DEBUG=true
+      
+  # AI Dashboard Service - Development overrides
+  ai_dashboard_service:
+    volumes:
+      - ./ai_dashboard_service:/app
+      - ./shared:/app/shared
+    environment:
+      - DEBUG=true
+      
+  # Agent Orchestrator - Development overrides
+  agent_orchestrator:
+    volumes:
+      - ./agent_orchestrator:/app
+      - ./shared:/app/shared
+    environment:
+      - DEBUG=true
+
+  # Development databases with exposed ports
+  postgres:
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=surveillance_dev_db
+      
+  redis:
+    ports:
+      - "6379:6379"
+      
+  # Monitoring services
+  grafana:
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      
+  prometheus:
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      
+  # Development tools
+  weaviate:
+    ports:
+      - "8080:8080"
+    environment:
+      - QUERY_DEFAULTS_LIMIT=25
+      - AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true
+      - PERSISTENCE_DATA_PATH=/var/lib/weaviate
+      - DEFAULT_VECTORIZER_MODULE=none
+      - ENABLE_MODULES=text2vec-openai,text2vec-cohere,text2vec-huggingface,ref2vec-centroid,generative-openai,qna-openai
+    volumes:
+      - weaviate_data:/var/lib/weaviate
+
+volumes:
+  weaviate_data:
