@@ -43,32 +43,86 @@ The system consists of the following microservices:
 - Python 3.8+
 - Git
 
-### Installation
+### Installation Options
 
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd surveillance-system
-```
+#### Option 1: GitHub Codespaces (Recommended for Quick Start)
 
-2. Configure environment variables:
-```bash
-cp .env.example .env
-```
+1. **Open in Codespace:**
+   - Click "Code" → "Codespaces" → "Create codespace"
+   - The system will automatically set up using `.devcontainer/devcontainer.json`
 
-3. Set up the development environment:
-```bash
-./scripts/setup-dev.sh
-```
+2. **Automatic Setup:**
+   ```bash
+   # The setup runs automatically via postCreateCommand
+   # If needed, run manually:
+   bash codespace-setup.sh
+   ```
 
-4. Start the system:
-```bash
-./scripts/start-system.sh
-```
+3. **Access Services:**
+   - API Gateway: http://localhost:8000
+   - Grafana: http://localhost:3000 (admin/admin123)
+   - Prometheus: http://localhost:9090
 
-5. Stop the system:
+#### Option 2: Local Linux/Ubuntu Setup
+
+1. **Clone and Setup:**
+   ```bash
+   git clone <repository-url>
+   cd surveillance-system
+   chmod +x setup-linux.sh
+   ./setup-linux.sh
+   ```
+
+2. **Quick Commands:**
+   ```bash
+   # Start system
+   ./start.sh
+   
+   # Check status
+   ./status.sh
+   
+   # View logs
+   ./logs.sh
+   
+   # Stop system
+   ./stop.sh
+   ```
+
+#### Option 3: Windows PowerShell Setup
+
+1. **Clone and Setup:**
+   ```powershell
+   git clone <repository-url>
+   cd surveillance-system
+   .\setup-windows.ps1
+   ```
+
+2. **Quick Commands:**
+   ```powershell
+   # Start system
+   .\quick-start.ps1
+   
+   # Check status
+   .\check-status.ps1
+   
+   # Stop system
+   .\quick-start.ps1 -Stop
+   ```
+
+### Advanced Setup Options
+
 ```bash
-./scripts/stop-system.sh
+# Development mode with monitoring
+./setup-linux.sh --dev-mode
+
+# Quick setup (basic services only)
+./setup-linux.sh --quick
+
+# Build only (no service startup)
+./setup-linux.sh --build-only
+
+# Clean installation
+./setup-linux.sh clean
 ```
 
 ## Services Overview
