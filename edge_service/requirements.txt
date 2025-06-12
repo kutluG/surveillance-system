@@ -36,7 +36,7 @@ PyJWT==2.8.0
 requests==2.31.0
 
 # Additional utilities
-python-multipart==0.0.6
+python-multipart==0.0.20
 
 # Observability dependencies
 opentelemetry-api>=1.20.0
