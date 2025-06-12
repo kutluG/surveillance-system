@@ -26,9 +26,12 @@ import redis.asyncio as redis
 import httpx
 from openai import AsyncOpenAI
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from shared.logging_config import configure_logging, get_logger, log_context
+from shared.audit_middleware import add_audit_middleware
+from shared.middleware import add_rate_limiting
+
+# Configure logging first
+logger = configure_logging("rule_builder_service")
 
 # Initialize OpenAI client
 openai_client = AsyncOpenAI(
@@ -588,8 +591,15 @@ rule_builder = RuleBuilderEngine()
 app = FastAPI(
     title="Interactive Rule Builder",
     description="Enhanced rule creation with guided assistance",
-    version="1.0.0"
+    version="1.0.0",
+    openapi_prefix="/api/v1"
 )
+
+# Add audit middleware
+add_audit_middleware(app, service_name="rule_builder_service")
+
+# Add rate limiting middleware
+add_rate_limiting(app, service_name="rule_builder_service")
 
 # CORS middleware
 app.add_middleware(
@@ -601,7 +611,7 @@ app.add_middleware(
 )
 
 # API Endpoints
-@app.post("/build/start")
+@app.post("/api/v1/build/start")
 async def start_rule_building(user_id: str):
     """Start a new rule building session"""
     try:
@@ -612,10 +622,9 @@ async def start_rule_building(user_id: str):
             "step": "intent"
         }
     except Exception as e:
-        logger.error(f"Error starting build session: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error starting build session: {e}")        raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/build/step")
+@app.post("/api/v1/build/step")
 async def process_build_step(request: BuildStepRequest):
     """Process a step in the rule building process"""
     try:
@@ -625,7 +634,7 @@ async def process_build_step(request: BuildStepRequest):
         logger.error(f"Error processing build step: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/build/session/{session_id}")
+@app.get("/api/v1/build/session/{session_id}")
 async def get_build_session(session_id: str):
     """Get current session state"""
     try:
@@ -635,7 +644,7 @@ async def get_build_session(session_id: str):
         logger.error(f"Error getting session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/templates")
+@app.get("/api/v1/templates")
 async def list_templates(category: Optional[str] = None):
     """List available rule templates"""
     templates = []
@@ -643,10 +652,9 @@ async def list_templates(category: Optional[str] = None):
         if category and template.category.lower() != category.lower():
             continue
         templates.append(asdict(template))
-    
-    return {"templates": templates}
+      return {"templates": templates}
 
-@app.post("/templates/{template_id}/customize")
+@app.post("/api/v1/templates/{template_id}/customize")
 async def customize_template(template_id: str, request: TemplateCustomizationRequest):
     """Customize a rule template"""
     if template_id not in RULE_TEMPLATES:
@@ -683,10 +691,9 @@ async def customize_template(template_id: str, request: TemplateCustomizationReq
     
     return {
         "customized_rule": customized_rule,
-        "session_id": request.session_id
-    }
+        "session_id": request.session_id    }
 
-@app.post("/validate")
+@app.post("/api/v1/validate")
 async def validate_rule(request: RuleValidationRequest):
     """Validate a rule"""
     try:
@@ -699,7 +706,7 @@ async def validate_rule(request: RuleValidationRequest):
         logger.error(f"Error validating rule: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/suggestions")
+@app.post("/api/v1/suggestions")
 async def get_rule_suggestions(request: RuleSuggestionRequest):
     """Get intelligent suggestions for rule completion"""
     try:

@@ -1,11 +1,14 @@
 fastapi
 uvicorn[standard]
+slowapi==0.1.9
 confluent-kafka
 sqlalchemy
 psycopg2-binary
 weaviate-client
 structlog
 prometheus_client
+python-json-logger>=2.0.0
+PyJWT>=2.0.0
 # Observability dependencies
 opentelemetry-api>=1.20.0
 opentelemetry-sdk>=1.20.0

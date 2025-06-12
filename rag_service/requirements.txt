@@ -1,6 +1,10 @@
 fastapi
 uvicorn[standard]
-weaviate-client
+slowapi==0.1.9
+weaviate-client>=4.0.0,<5.0.0
 openai>=1.0.0
 structlog
 prometheus_client
+python-json-logger>=2.0.0
+PyJWT>=2.0.0
+pydantic>=2.8.0,<3.0.0

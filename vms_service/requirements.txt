@@ -1,9 +1,11 @@
 fastapi
 uvicorn[standard]
+slowapi==0.1.9
 opencv-python-headless
 boto3
 numpy
 pydantic
 structlog
 prometheus_client
--e ../shared
+python-json-logger>=2.0.0
+PyJWT>=2.0.0

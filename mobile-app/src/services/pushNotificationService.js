@@ -1,6 +1,6 @@
 import messaging from '@react-native-firebase/messaging';
 import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from '../utils/secureStorage';
 import { Platform, Alert, AppState } from 'react-native';
 
 class PushNotificationService {
@@ -63,9 +63,8 @@ class PushNotificationService {
       // Get FCM token
       this.fcmToken = await messaging().getToken();
       console.log('FCM Token:', this.fcmToken);
-      
-      // Store token locally
-      await AsyncStorage.setItem('fcm_token', this.fcmToken);
+        // Store token locally
+      await secureStorage.setItem('fcm_token', this.fcmToken);
       
       // Send token to backend
       await this.sendTokenToBackend(this.fcmToken);
@@ -74,7 +73,7 @@ class PushNotificationService {
       this.unsubscribeTokenRefresh = messaging().onTokenRefresh(async (token) => {
         console.log('FCM Token refreshed:', token);
         this.fcmToken = token;
-        await AsyncStorage.setItem('fcm_token', token);
+        await secureStorage.setItem('fcm_token', token);
         await this.sendTokenToBackend(token);
       });
     } catch (error) {
@@ -153,7 +152,7 @@ class PushNotificationService {
   async sendTokenToBackend(token) {
     try {
       // This would integrate with your auth service
-      const authToken = await AsyncStorage.getItem('auth_token');
+      const authToken = await secureStorage.getItem('auth_token');
       if (!authToken) {
         console.log('No auth token available, skipping FCM token registration');
         return;

@@ -32,6 +32,12 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text
 
+# Import shared middleware for rate limiting
+from shared.middleware import add_rate_limiting
+
+# Import orchestrator module
+from orchestrator import orchestrator_service, OrchestrationRequest, OrchestrationResponse
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -415,6 +421,9 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting Agent Orchestrator Service...")
     
+    # Initialize orchestrator service
+    await orchestrator_service.initialize()
+    
     # Start background task processor
     processor_task = asyncio.create_task(task_processor())
     
@@ -423,11 +432,15 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down Agent Orchestrator Service...")
     processor_task.cancel()
+    
+    # Shutdown orchestrator service
+    await orchestrator_service.shutdown()
 
 app = FastAPI(
     title="Agent Orchestration Coordinator",
     description="Central coordinator for AI agent activities",
     version="1.0.0",
+    openapi_prefix="/api/v1",
     lifespan=lifespan
 )
 
@@ -440,8 +453,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add rate limiting middleware
+add_rate_limiting(app, service_name="agent_orchestrator")
+
 # API Endpoints
-@app.post("/agents/register")
+@app.post("/api/v1/agents/register")
 async def register_agent(agent_info: AgentRegistrationRequest):
     """Register a new agent"""
     try:
@@ -451,7 +467,7 @@ async def register_agent(agent_info: AgentRegistrationRequest):
         logger.error(f"Error registering agent: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/agents")
+@app.get("/api/v1/agents")
 async def list_agents():
     """List all registered agents"""
     agents = []
@@ -461,7 +477,7 @@ async def list_agents():
         agents.append(agent_dict)
     return {"agents": agents}
 
-@app.post("/tasks")
+@app.post("/api/v1/tasks")
 async def create_task(task_request: CreateTaskRequest):
     """Create a new task"""
     try:
@@ -471,7 +487,7 @@ async def create_task(task_request: CreateTaskRequest):
         logger.error(f"Error creating task: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/tasks/{task_id}")
+@app.get("/api/v1/tasks/{task_id}")
 async def get_task(task_id: str):
     """Get task details"""
     if task_id not in state.tasks:
@@ -487,7 +503,7 @@ async def get_task(task_id: str):
     
     return task_dict
 
-@app.get("/tasks")
+@app.get("/api/v1/tasks")
 async def list_tasks(status: Optional[str] = None, workflow_id: Optional[str] = None):
     """List tasks with optional filtering"""
     tasks = []
@@ -507,7 +523,7 @@ async def list_tasks(status: Optional[str] = None, workflow_id: Optional[str] = 
     
     return {"tasks": tasks}
 
-@app.post("/workflows")
+@app.post("/api/v1/workflows")
 async def create_workflow(workflow_request: CreateWorkflowRequest):
     """Create a new workflow"""
     try:
@@ -521,7 +537,7 @@ async def create_workflow(workflow_request: CreateWorkflowRequest):
         logger.error(f"Error creating workflow: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/workflows/{workflow_id}")
+@app.get("/api/v1/workflows/{workflow_id}")
 async def get_workflow(workflow_id: str):
     """Get workflow details"""
     if workflow_id not in state.workflows:
@@ -533,7 +549,7 @@ async def get_workflow(workflow_id: str):
     
     return workflow_dict
 
-@app.get("/workflows")
+@app.get("/api/v1/workflows")
 async def list_workflows(user_id: Optional[str] = None):
     """List workflows with optional user filtering"""
     workflows = []
@@ -547,7 +563,7 @@ async def list_workflows(user_id: Optional[str] = None):
     
     return {"workflows": workflows}
 
-@app.get("/status")
+@app.get("/api/v1/status")
 async def get_system_status():
     """Get system status"""
     active_agents = len([a for a in state.agents.values() if a.status == "busy"])
@@ -579,6 +595,49 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
+@app.post("/api/v1/orchestrate", response_model=OrchestrationResponse)
+async def orchestrate(request: OrchestrationRequest):
+    """
+    Main orchestration endpoint that coordinates downstream microservices
+    
+    This endpoint:
+    1. Calls RAG service for context retrieval (with fallback on failure)
+    2. Calls Rule Generation service for policy evaluation (with defaults on failure)
+    3. Calls Notifier service for alert dispatch (with retry queue on failure)
+    
+    Returns unified response with appropriate HTTP status codes:
+    - 200: Full success
+    - 202: Notifier issue (will retry in background)
+    - 503: Critical upstream failures
+    """
+    try:
+        result = await orchestrator_service.orchestrate(request)
+        
+        # Determine appropriate HTTP status code
+        if result.status == "ok":
+            return result
+        elif result.status == "partial_success" and result.details.get("notification_queued_for_retry"):
+            # Return 202 for notifier issues
+            raise HTTPException(status_code=202, detail=result.dict())
+        elif result.status == "fallback":
+            # Return 503 for critical upstream failures
+            raise HTTPException(status_code=503, detail=result.dict())
+        else:
+            return result
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Orchestration failed: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail={
+                "status": "error",
+                "details": {"error": str(e), "timestamp": datetime.utcnow().isoformat()}
+            }
+        )
+
+# ...existing code...
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8006)

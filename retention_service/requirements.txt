@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+slowapi==0.1.9
+sqlalchemy
+psycopg2-binary
+boto3
+apscheduler
+pydantic
+structlog
+prometheus_client
+python-json-logger>=2.0.0
+PyJWT>=2.0.0

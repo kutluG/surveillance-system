@@ -8,20 +8,32 @@ import threading
 from typing import Optional
 
 from confluent_kafka import Consumer, KafkaError
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from sqlalchemy.exc import SQLAlchemyError
 
-from shared.logging import get_logger
+from shared.logging_config import configure_logging, get_logger, log_context
+from shared.audit_middleware import add_audit_middleware
 from shared.metrics import instrument_app
 from shared.models import CameraEvent
+from shared.middleware import add_rate_limiting
 
 from database import SessionLocal, engine
 from models import Base, Event as DbEvent
 from weaviate_client import client as weaviate_client, init_schema
 
-LOGGER = get_logger("ingest_service")
-app = FastAPI(title="Event Ingest Service")
+# Configure logging first
+logger = configure_logging("ingest_service")
+app = FastAPI(
+    title="Event Ingest Service",
+    openapi_prefix="/api/v1"
+)
+
+# Add audit middleware
+add_audit_middleware(app, service_name="ingest_service", use_camera_middleware=True)
 instrument_app(app, service_name="ingest_service")
+
+# Add rate limiting middleware
+add_rate_limiting(app, service_name="ingest_service")
 
 # Kafka configuration
 KAFKA_BROKER = os.getenv("KAFKA_BROKER", "kafka:9092")
@@ -36,9 +48,19 @@ def save_to_db(event: CameraEvent):
         db_event = DbEvent.from_camera_event(event)
         db.add(db_event)
         db.commit()
+        logger.info("Event saved to database", extra={
+            'action': 'save_to_db',
+            'event_id': str(event.id),
+            'camera_id': event.camera_id
+        })
     except SQLAlchemyError as e:
         db.rollback()
-        LOGGER.error("DB error inserting event", error=str(e))
+        logger.error("DB error inserting event", extra={
+            'action': 'save_to_db_error',
+            'event_id': str(event.id),
+            'camera_id': event.camera_id,
+            'error': str(e)
+        })
     finally:
         db.close()
 
@@ -79,22 +101,36 @@ def consume_loop():
             continue
         if msg.error():
             if msg.error().code() != KafkaError._PARTITION_EOF:
-                LOGGER.error("Kafka error", error=str(msg.error()))
+                logger.error("Kafka error", extra={
+                    'action': 'kafka_error',
+                    'error': str(msg.error())
+                })
             continue
         raw = msg.value().decode("utf-8")
         try:
             data = json.loads(raw)
             event = CameraEvent.parse_obj(data)
-            save_to_db(event)
-            upsert_to_weaviate(event)
-            LOGGER.info("Processed event", event_id=str(event.id))
+            
+            with log_context(action="ingest_event", camera_id=event.camera_id, event_id=str(event.id)):
+                save_to_db(event)
+                upsert_to_weaviate(event)
+                logger.info("Processed event successfully", extra={
+                    'action': 'ingest_event',
+                    'event_id': str(event.id),
+                    'camera_id': event.camera_id,
+                    'event_type': event.event_type.value
+                })
         except Exception as e:
-            LOGGER.error("Failed to process message", error=str(e), payload=raw)
+            logger.error("Failed to process message", extra={
+                'action': 'ingest_event_error',
+                'error': str(e),
+                'payload': raw[:500]  # Truncate payload for logging
+            })
 
 @app.on_event("startup")
 def startup_event():
     global consumer
-    LOGGER.info("Starting Event Ingest Service")
+    logger.info("Starting Event Ingest Service", extra={'action': 'service_startup'})
     # Create tables if they do not exist
     Base.metadata.create_all(bind=engine)
     # Initialize Kafka consumer
@@ -107,12 +143,18 @@ def startup_event():
     # Start background thread
     thread = threading.Thread(target=consume_loop, daemon=True)
     thread.start()
+    logger.info("Kafka consumer initialized", extra={
+        'action': 'kafka_consumer_init',
+        'broker': KAFKA_BROKER,
+        'topic': KAFKA_TOPIC,
+        'group_id': GROUP_ID
+    })
 
 @app.on_event("shutdown")
 def shutdown_event():
     if consumer:
         consumer.close()
-    LOGGER.info("Event Ingest Service shutdown complete")
+    logger.info("Event Ingest Service shutdown complete", extra={'action': 'service_shutdown'})
 
 @app.get("/health")
 def health():
@@ -121,4 +163,36 @@ def health():
     """
     if consumer is None:
         raise HTTPException(status_code=503, detail="consumer not initialized")
+    logger.info("Health check performed", extra={'action': 'health_check'})
     return {"status": "ok"}
+
+@app.post("/api/v1/ingest")
+async def ingest_event(request: Request, event: CameraEvent):
+    """
+    Manual event ingestion endpoint for testing.
+    """
+    user_id = getattr(request.state, 'user_id', None)
+    
+    with log_context(action="manual_ingest", camera_id=event.camera_id, event_id=str(event.id), user_id=user_id):
+        try:
+            save_to_db(event)
+            upsert_to_weaviate(event)
+            
+            logger.info("Manual event ingestion successful", extra={
+                'action': 'manual_ingest',
+                'event_id': str(event.id),
+                'camera_id': event.camera_id,
+                'user_id': user_id
+            })
+            
+            return {"status": "success", "event_id": str(event.id)}
+            
+        except Exception as e:
+            logger.error("Manual event ingestion failed", extra={
+                'action': 'manual_ingest_error',
+                'event_id': str(event.id),
+                'camera_id': event.camera_id,
+                'user_id': user_id,
+                'error': str(e)
+            })
+            raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")

@@ -8,16 +8,29 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import datetime
 
-from shared.logging import get_logger
+from shared.logging_config import configure_logging, get_logger, log_context
+from shared.audit_middleware import add_audit_middleware
 from shared.metrics import instrument_app
+from shared.middleware import add_rate_limiting
 
 from database import SessionLocal, engine
 from models import Base, NotificationLog, NotificationStatus
 from channels import CHANNELS
 
-LOGGER = get_logger("notifier")
-app = FastAPI(title="Notifier Service")
+# Configure logging first
+logger = configure_logging("notifier")
+
+app = FastAPI(
+    title="Notifier Service",
+    openapi_prefix="/api/v1"
+)
+
+# Add audit middleware
+add_audit_middleware(app, service_name="notifier")
 instrument_app(app, service_name="notifier")
+
+# Add rate limiting middleware
+add_rate_limiting(app, service_name="notifier")
 
 def get_db():
     db = SessionLocal()
@@ -41,7 +54,7 @@ class NotificationResponse(BaseModel):
 
 @app.on_event("startup")
 def startup_event():
-    LOGGER.info("Starting Notifier Service")
+    logger.info("Starting Notifier Service")
     Base.metadata.create_all(bind=engine)
 
 @app.get("/health")
@@ -65,7 +78,7 @@ async def send_notification_task(
         ).first()
         
         if not log_entry:
-            LOGGER.error("Notification log entry not found", id=notification_id)
+            logger.error("Notification log entry not found", id=notification_id)
             return
         
         # Get channel implementation
@@ -82,21 +95,21 @@ async def send_notification_task(
             await channel_impl.send(recipients, subject, message, metadata)
             log_entry.status = NotificationStatus.SENT
             log_entry.sent_at = datetime.utcnow()
-            LOGGER.info("Notification sent successfully", id=notification_id, channel=channel)
+            logger.info("Notification sent successfully", id=notification_id, channel=channel)
             
         except Exception as e:
             log_entry.status = NotificationStatus.FAILED
             log_entry.error_message = str(e)
-            LOGGER.error("Notification send failed", id=notification_id, error=str(e))
+            logger.error("Notification send failed", id=notification_id, error=str(e))
         
         db.commit()
         
     except Exception as e:
-        LOGGER.error("Notification task failed", id=notification_id, error=str(e))
+        logger.error("Notification task failed", id=notification_id, error=str(e))
     finally:
         db.close()
 
-@app.post("/send", response_model=NotificationResponse)
+@app.post("/api/v1/send", response_model=NotificationResponse)
 async def send_notification(
     req: NotificationRequest,
     background_tasks: BackgroundTasks,
@@ -105,7 +118,7 @@ async def send_notification(
     """
     Send a notification through the specified channel.
     """
-    LOGGER.info("Notification request received", channel=req.channel, recipients=req.recipients)
+    logger.info("Notification request received", channel=req.channel, recipients=req.recipients)
     
     # Validate channel
     if req.channel not in CHANNELS:
@@ -142,7 +155,7 @@ async def send_notification(
         message="Notification queued for delivery"
     )
 
-@app.get("/notifications/{notification_id}")
+@app.get("/api/v1/notifications/{notification_id}")
 async def get_notification_status(
     notification_id: str,
     db: Session = Depends(get_db)
@@ -169,7 +182,7 @@ async def get_notification_status(
         "rule_id": log_entry.rule_id,
     }
 
-@app.get("/notifications")
+@app.get("/api/v1/notifications")
 async def list_notifications(
     channel: Optional[str] = None,
     status: Optional[str] = None,
@@ -203,7 +216,7 @@ async def list_notifications(
         for notif in notifications
     ]
 
-@app.post("/test/{channel}")
+@app.post("/api/v1/test/{channel}")
 async def test_channel(
     channel: str,
     recipients: List[str],

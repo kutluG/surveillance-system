@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from '../utils/secureStorage';
 import { API_CONFIG } from '../constants';
 
 class WebSocketService {
@@ -19,7 +19,7 @@ class WebSocketService {
 
     try {
       this.isConnecting = true;
-      const token = await AsyncStorage.getItem('token');
+      const token = await secureStorage.getItem('token');
       
       if (!token) {
         throw new Error('No authentication token available');

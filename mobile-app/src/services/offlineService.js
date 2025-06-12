@@ -1,6 +1,6 @@
 import React from 'react';
 import { Platform } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from '../utils/secureStorage';
 import RNFS from 'react-native-fs';
 import NetInfo from '@react-native-netinfo/netinfo';
 
@@ -64,10 +64,9 @@ class OfflineService {
       console.error('Failed to set up network monitoring:', error);
     }
   }
-
   async loadOfflineData() {
     try {
-      const offlineDataString = await AsyncStorage.getItem('offline_data');
+      const offlineDataString = await secureStorage.getItem('offline_data');
       if (offlineDataString) {
         const data = JSON.parse(offlineDataString);
         this.offlineData = new Map(Object.entries(data));
@@ -81,15 +80,14 @@ class OfflineService {
   async saveOfflineData() {
     try {
       const dataObject = Object.fromEntries(this.offlineData);
-      await AsyncStorage.setItem('offline_data', JSON.stringify(dataObject));
+      await secureStorage.setItem('offline_data', JSON.stringify(dataObject));
     } catch (error) {
       console.error('Failed to save offline data:', error);
     }
   }
-
   async loadSyncQueue() {
     try {
-      const syncQueueString = await AsyncStorage.getItem('sync_queue');
+      const syncQueueString = await secureStorage.getItem('sync_queue');
       if (syncQueueString) {
         this.syncQueue = JSON.parse(syncQueueString);
         console.log(`Loaded ${this.syncQueue.length} pending sync items`);
@@ -101,7 +99,7 @@ class OfflineService {
 
   async saveSyncQueue() {
     try {
-      await AsyncStorage.setItem('sync_queue', JSON.stringify(this.syncQueue));
+      await secureStorage.setItem('sync_queue', JSON.stringify(this.syncQueue));
     } catch (error) {
       console.error('Failed to save sync queue:', error);
     }

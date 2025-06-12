@@ -3,7 +3,7 @@
  * Provides consistent error handling across all API services
  */
 import { Alert } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from './secureStorage';
 import EnvironmentConfig from '../config/environment';
 
 export const ERROR_TYPES = {
@@ -109,12 +109,11 @@ class NetworkErrorHandler {
 
   /**
    * Handle authentication errors
-   */
-  async handleAuthError() {
+   */  async handleAuthError() {
     try {
       // Clear stored auth token
-      await AsyncStorage.removeItem('auth_token');
-      await AsyncStorage.removeItem('refresh_token');
+      await secureStorage.removeItem('auth_token');
+      await secureStorage.removeItem('refresh_token');
       
       // Show auth error message
       Alert.alert(

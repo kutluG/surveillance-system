@@ -7,9 +7,9 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import redis
 
-from shared.logging import get_logger
+from shared.logging_config import get_logger, log_context
 
-LOGGER = get_logger("conversation_manager")
+logger = get_logger("conversation_manager")
 
 class ConversationManager:
     def __init__(self, redis_client: redis.Redis):
@@ -51,7 +51,7 @@ class ConversationManager:
         )
         self.redis.expire(user_conversations_key, self.conversation_ttl)
         
-        LOGGER.info("Created conversation", conversation_id=conversation_id, user_id=user_id)
+        logger.info("Created conversation", extra={conversation_id=conversation_id, user_id=user_id})
         return conversation
     
     async def get_conversation(self, conversation_id: str) -> Optional[Dict[str, Any]]:
@@ -62,7 +62,7 @@ class ConversationManager:
         if conversation_data:
             return json.loads(conversation_data)
         
-        LOGGER.warning("Conversation not found", conversation_id=conversation_id)
+        logger.warning("Conversation not found", conversation_id=conversation_id)
         return None
     
     async def update_conversation(
@@ -127,7 +127,7 @@ class ConversationManager:
             "message_count": await self.get_message_count(conversation_id)
         })
         
-        LOGGER.info("Added message", 
+        logger.info("Added message", 
                    conversation_id=conversation_id, 
                    message_id=message_id, 
                    role=role)
@@ -207,7 +207,7 @@ class ConversationManager:
         
         pipe.execute()
         
-        LOGGER.info("Deleted conversation", conversation_id=conversation_id)
+        logger.info("Deleted conversation", extra={conversation_id=conversation_id})
         return True
     
     async def cleanup_expired_conversations(self) -> int:

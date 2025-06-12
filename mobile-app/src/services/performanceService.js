@@ -1,7 +1,7 @@
 import React from 'react';
 import { Platform } from 'react-native';
 import RNFS from 'react-native-fs';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from '../utils/secureStorage';
 
 class PerformanceService {
   constructor() {
@@ -207,10 +207,9 @@ class PerformanceService {
       console.error('Failed to clean old cache files:', error);
     }
   }
-
   async getCacheStatistics() {
     try {
-      const cacheStats = await AsyncStorage.getItem('cache_statistics');
+      const cacheStats = await secureStorage.getItem('cache_statistics');
       if (cacheStats) {
         return JSON.parse(cacheStats);
       }
@@ -224,7 +223,7 @@ class PerformanceService {
   async updateCacheStatistics(hits, misses) {
     try {
       const stats = { hits, misses };
-      await AsyncStorage.setItem('cache_statistics', JSON.stringify(stats));
+      await secureStorage.setItem('cache_statistics', JSON.stringify(stats));
     } catch (error) {
       console.error('Failed to update cache statistics:', error);
     }

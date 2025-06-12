@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { API_CONFIG } from '../constants';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from '../utils/secureStorage';
 
 // Create axios instance for camera service
 const cameraAPI = axios.create({
@@ -11,7 +11,7 @@ const cameraAPI = axios.create({
 // Request interceptor to add auth token
 cameraAPI.interceptors.request.use(
   async (config) => {
-    const token = await AsyncStorage.getItem('token');
+    const token = await secureStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -28,7 +28,7 @@ cameraAPI.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       // Handle unauthorized - logout user
-      AsyncStorage.removeItem('token');
+      secureStorage.removeItem('token');
     }
     return Promise.reject(error);
   }

@@ -3,7 +3,7 @@
  * Tracks app performance metrics, API response times, and user interactions
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from './secureStorage';
 import NetInfo from '@react-native-community/netinfo';
 
 class PerformanceMonitor {
@@ -230,7 +230,7 @@ class PerformanceMonitor {
       details,
     };
     
-    // Store in AsyncStorage for crash recovery
+    // Store in secure storage for crash recovery
     this.persistPerformanceIssue(issue);
   }
 
@@ -356,9 +356,8 @@ class PerformanceMonitor {
       export_timestamp: Date.now(),
       app_version: '1.0.0', // Get from package.json or config
     };
-    
-    try {
-      await AsyncStorage.setItem('@performance_data', JSON.stringify(data));
+      try {
+      await secureStorage.setItem('@performance_data', JSON.stringify(data));
       console.log('📊 Performance data exported to storage');
       return data;
     } catch (error) {
@@ -373,32 +372,29 @@ class PerformanceMonitor {
   clearPerformanceData() {
     this.metrics.clear();
     this.apiMetrics.clear();
-    this.networkMetrics.clear();
-    this.memoryMetrics = [];
+    this.networkMetrics.clear();    this.memoryMetrics = [];
     this.userInteractions = [];
     
-    AsyncStorage.removeItem('@performance_data');
-    AsyncStorage.removeItem('@performance_issues');
+    secureStorage.removeItem('@performance_data');
+    secureStorage.removeItem('@performance_issues');
     
     console.log('📊 Performance data cleared');
   }
 
   /**
    * Persist performance issue to storage
-   */
-  async persistPerformanceIssue(issue) {
+   */  async persistPerformanceIssue(issue) {
     try {
-      const existing = await AsyncStorage.getItem('@performance_issues');
+      const existing = await secureStorage.getItem('@performance_issues');
       const issues = existing ? JSON.parse(existing) : [];
       
       issues.push(issue);
       
       // Keep only last 50 issues
       if (issues.length > 50) {
-        issues.splice(0, issues.length - 50);
-      }
+        issues.splice(0, issues.length - 50);      }
       
-      await AsyncStorage.setItem('@performance_issues', JSON.stringify(issues));
+      await secureStorage.setItem('@performance_issues', JSON.stringify(issues));
     } catch (error) {
       console.error('❌ Failed to persist performance issue:', error);
     }

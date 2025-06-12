@@ -5,7 +5,7 @@ import firestore from '@react-native-firebase/firestore';
 import storage from '@react-native-firebase/storage';
 import analytics from '@react-native-firebase/analytics';
 import crashlytics from '@react-native-firebase/crashlytics';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from '../utils/secureStorage';
 
 class FirebaseService {
   constructor() {
@@ -68,17 +68,16 @@ class FirebaseService {
       return false;
     }
   }
-
   async getFCMToken() {
     try {
       // Check if token exists in storage
-      let token = await AsyncStorage.getItem('fcm_token');
+      let token = await secureStorage.getItem('fcm_token');
       
       if (!token) {
         // Get new token
         token = await messaging().getToken();
         if (token) {
-          await AsyncStorage.setItem('fcm_token', token);
+          await secureStorage.setItem('fcm_token', token);
         }
       }
       
@@ -120,13 +119,11 @@ class FirebaseService {
           console.log('App opened from notification:', remoteMessage);
           this.handleNotificationOpened(remoteMessage);
         }
-      });
-
-    // Listen for token refresh
+      });    // Listen for token refresh
     messaging().onTokenRefresh(token => {
       console.log('FCM token refreshed:', token);
       this.fcmToken = token;
-      AsyncStorage.setItem('fcm_token', token);
+      secureStorage.setItem('fcm_token', token);
       this.updateTokenOnServer(token);
     });
   }

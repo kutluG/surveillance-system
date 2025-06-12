@@ -1,5 +1,4 @@
-{
-  "preset": "react-native",
+{  "preset": "react-native",
   "testEnvironment": "node",
   "setupFilesAfterEnv": [
     "<rootDir>/src/test/setup.js"
@@ -14,9 +13,8 @@
   ],
   "transform": {
     "^.+\\.(js|jsx|ts|tsx)$": "babel-jest"
-  },
-  "transformIgnorePatterns": [
-    "node_modules/(?!(react-native|@react-native|react-native-vector-icons|react-native-reanimated|react-native-gesture-handler|react-native-screens|react-navigation|@react-navigation|react-native-safe-area-context|react-native-biometrics|react-native-video|@react-native-firebase|react-native-push-notification|@react-native-notifee|react-native-background-job|react-native-sensors)/)"
+  },  "transformIgnorePatterns": [
+    "node_modules/(?!(react-native|@react-native|react-native-vector-icons|react-native-reanimated|react-native-gesture-handler|react-native-screens|react-navigation|@react-navigation|react-native-safe-area-context|react-native-biometrics|react-native-video|react-native-orientation-locker|@react-native-firebase|react-native-push-notification|@react-native-notifee|react-native-background-job|react-native-sensors|react-native-config)/)"
   ],
   "testPathIgnorePatterns": [
     "<rootDir>/node_modules/",
@@ -40,7 +38,7 @@
       "statements": 70
     }
   },
-  "moduleNameMapping": {
+  "moduleNameMapper": {
     "^@/(.*)$": "<rootDir>/src/$1",
     "^@components/(.*)$": "<rootDir>/src/components/$1",
     "^@screens/(.*)$": "<rootDir>/src/screens/$1",

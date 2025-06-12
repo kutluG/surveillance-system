@@ -33,6 +33,9 @@ import pyttsx3
 import threading
 from queue import Queue
 
+# Import shared middleware for rate limiting
+from shared.middleware import add_rate_limiting
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -528,7 +531,8 @@ command_processor = VoiceCommandProcessor()
 app = FastAPI(
     title="Voice Interface Service",
     description="Speech-to-text and text-to-speech for surveillance system",
-    version="1.0.0"
+    version="1.0.0",
+    openapi_prefix="/api/v1"
 )
 
 # CORS middleware
@@ -539,6 +543,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add rate limiting middleware
+add_rate_limiting(app, service_name="voice_interface_service")
 
 # WebSocket manager for real-time voice interaction
 class VoiceWebSocketManager:
@@ -563,7 +570,7 @@ class VoiceWebSocketManager:
 voice_ws_manager = VoiceWebSocketManager()
 
 # API Endpoints
-@app.post("/voice/session/create")
+@app.post("/api/v1/voice/session/create")
 async def create_voice_session(user_id: str, language: Language = Language.ENGLISH, 
                               voice_type: VoiceType = VoiceType.FEMALE):
     """Create a new voice session"""
@@ -578,7 +585,7 @@ async def create_voice_session(user_id: str, language: Language = Language.ENGLI
         logger.error(f"Error creating voice session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/voice/recognize")
+@app.post("/api/v1/voice/recognize")
 async def recognize_speech(file: UploadFile = File(...), 
                           session_id: str = None,
                           language: Language = Language.ENGLISH):
@@ -614,10 +621,9 @@ async def recognize_speech(file: UploadFile = File(...),
         return {"recognition_result": asdict(result)}
         
     except Exception as e:
-        logger.error(f"Error recognizing speech: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error recognizing speech: {e}")        raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/voice/speak")
+@app.post("/api/v1/voice/speak")
 async def generate_speech(request: VoiceQueryRequest):
     """Generate speech from text"""
     try:
@@ -645,10 +651,9 @@ async def generate_speech(request: VoiceQueryRequest):
         }
         
     except Exception as e:
-        logger.error(f"Error generating speech: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error generating speech: {e}")        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/voice/audio/{audio_id}")
+@app.get("/api/v1/voice/audio/{audio_id}")
 async def get_audio(audio_id: str):
     """Get generated audio by ID"""
     try:
@@ -667,7 +672,7 @@ async def get_audio(audio_id: str):
         logger.error(f"Error retrieving audio: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/voice/command")
+@app.post("/api/v1/voice/command")
 async def process_voice_command(text: str, session_id: str):
     """Process voice command from text"""
     try:
@@ -747,10 +752,9 @@ async def voice_websocket_endpoint(websocket: WebSocket, session_id: str):
     except WebSocketDisconnect:
         voice_ws_manager.disconnect(session_id)
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        voice_ws_manager.disconnect(session_id)
+        logger.error(f"WebSocket error: {e}")        voice_ws_manager.disconnect(session_id)
 
-@app.get("/voice/sessions/{session_id}")
+@app.get("/api/v1/voice/sessions/{session_id}")
 async def get_voice_session(session_id: str):
     """Get voice session details"""
     try:

@@ -1,0 +1,33 @@
+# Docker Compose extension for retention cron job
+# This extends the main docker-compose.yml with a cron-based retention job
+
+services:
+  # Cron-based retention job using bitnami/cron
+  retention_cron:
+    image: bitnami/cron:latest
+    environment:
+      - CRON_1_COMMAND=docker exec surveillance-system-retention-service-1 python -m retention_service.main --run-once
+      - CRON_1_SCHEDULE=0 2 * * *  # Daily at 02:00 AM
+      - CRON_1_USER=root
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - retention_service
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=false"  # Don't expose via reverse proxy
+
+  # Alternative: Simple cron container that calls the retention service API
+  retention_scheduler:
+    image: alpine:latest
+    command: >
+      sh -c "
+        apk add --no-cache curl &&
+        echo '0 2 * * * curl -X POST http://retention_service:8000/purge/run' | crontab - &&
+        crond -f -l 2
+      "
+    depends_on:
+      - retention_service
+    restart: unless-stopped
+    profiles:
+      - scheduler

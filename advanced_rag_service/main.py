@@ -13,6 +13,7 @@ This service extends the basic RAG service with:
 import asyncio
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple, Union
 from dataclasses import dataclass, asdict
@@ -21,9 +22,9 @@ import uuid
 import base64
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import redis.asyncio as redis
 import httpx
 import numpy as np
@@ -32,13 +33,38 @@ import cv2
 import weaviate
 from openai import AsyncOpenAI
 
+# Import shared middleware for rate limiting
+from shared.middleware import add_rate_limiting
+
+# Import advanced RAG module  
+import advanced_rag
+from advanced_rag import QueryEvent
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize clients
-openai_client = AsyncOpenAI(api_key="your-openai-api-key")
-weaviate_client = weaviate.Client("http://localhost:8080")
+# Environment configuration
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+WEAVIATE_URL = os.getenv("WEAVIATE_URL", "http://weaviate:8080")
+WEAVIATE_API_KEY = os.getenv("WEAVIATE_API_KEY")
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/7")
+
+if not OPENAI_API_KEY:
+    logger.warning("OPENAI_API_KEY not set - AI analysis will be limited")
+
+# Initialize clients with proper error handling
+try:
+    openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+    
+    weaviate_client = weaviate.Client(
+        url=WEAVIATE_URL,
+        auth_client_secret=weaviate.AuthApiKey(api_key=WEAVIATE_API_KEY) if WEAVIATE_API_KEY else None
+    )
+except Exception as e:
+    logger.error(f"Failed to initialize clients: {e}")
+    openai_client = None
+    weaviate_client = None
 
 
 # Enums
@@ -143,6 +169,19 @@ class MultiModalAnalysisRequest(BaseModel):
     include_video: bool = False
     include_images: bool = False
     time_range: Optional[str] = None
+
+
+class TemporalRAGQueryRequest(BaseModel):
+    """Request model for temporal RAG queries"""
+    query_event: Dict[str, Any] = Field(..., description="Query event with camera_id, timestamp, label, and optional bbox")
+    k: int = Field(default=10, ge=1, le=100, description="Number of similar events to retrieve")
+
+
+class TemporalRAGQueryResponse(BaseModel):
+    """Response model for temporal RAG queries"""
+    linked_explanation: str = Field(..., description="LLM explanation emphasizing temporal flow and causality")
+    retrieved_context: List[Dict[str, Any]] = Field(..., description="Retrieved events in chronological order")
+    explanation_confidence: float = Field(..., description="Confidence score (0-1) based on vector similarity of retrieved context")
 
 
 # Global state
@@ -674,6 +713,7 @@ app = FastAPI(
     title="Advanced RAG Service",
     description="Enhanced evidence processing with multi-modal analysis and correlation",
     version="1.0.0",
+    openapi_prefix="/api/v1"
 )
 
 # CORS middleware
@@ -685,9 +725,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add rate limiting middleware
+add_rate_limiting(app, service_name="advanced_rag_service")
+
 
 # API Endpoints
-@app.post("/evidence/analyze")
+@app.post("/api/v1/evidence/analyze")
 async def analyze_evidence(file: UploadFile = File(...), metadata: str = "{}"):
     """Analyze uploaded evidence file"""
     try:
@@ -720,27 +763,24 @@ async def analyze_evidence(file: UploadFile = File(...), metadata: str = "{}"):
         # Calculate confidence score
         evidence.confidence_score = ConfidenceScorer.calculate_evidence_confidence(
             evidence
-        )
-
-        # Store evidence
+        )        # Store evidence
         redis_client = await get_redis_client()
         await redis_client.hset(
             "evidence", evidence.id, json.dumps(asdict(evidence), default=str)
         )
-
+        
         return {
             "evidence_id": evidence.id,
             "analysis": analysis,
             "confidence_score": evidence.confidence_score,
             "evidence_type": evidence_type,
         }
-
     except Exception as e:
         logger.error(f"Error analyzing evidence: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/evidence/correlate")
+@app.post("/api/v1/evidence/correlate")
 async def find_evidence_correlations(request: CorrelationAnalysisRequest):
     """Find correlations between evidence pieces"""
     try:
@@ -763,19 +803,16 @@ async def find_evidence_correlations(request: CorrelationAnalysisRequest):
         # Filter by minimum strength
         filtered_correlations = [
             corr for corr in correlations if corr.strength >= request.min_strength
-        ]
-
-        return {
+        ]        return {
             "correlations": [asdict(corr) for corr in filtered_correlations],
             "total_found": len(filtered_correlations),
         }
-
     except Exception as e:
         logger.error(f"Error finding correlations: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/evidence/chain")
+@app.post("/api/v1/evidence/chain")
 async def build_evidence_chain(evidence_ids: List[str]):
     """Build evidence chain from correlated evidence"""
     try:
@@ -864,11 +901,10 @@ def _get_confidence_level(score: float) -> ConfidenceLevel:
         return ConfidenceLevel.MEDIUM
     elif score > 0.3:
         return ConfidenceLevel.LOW
-    else:
-        return ConfidenceLevel.VERY_LOW
+    else:        return ConfidenceLevel.VERY_LOW
 
 
-@app.post("/query/advanced")
+@app.post("/api/v1/query/advanced")
 async def advanced_query(request: AdvancedQueryRequest):
     """Perform advanced multi-modal query with correlation analysis"""
     try:
@@ -878,14 +914,12 @@ async def advanced_query(request: AdvancedQueryRequest):
             include_images=EvidenceType.IMAGE in request.evidence_types,
             time_range=(request.temporal_range or {}).get("range"),
         )
-        return await analyze_multi_modal(multi_request)
-
-    except Exception as e:
+        return await analyze_multi_modal(multi_request)    except Exception as e:
         logger.error(f"Error processing advanced query: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/analyze/multi-modal")
+@app.post("/api/v1/analyze/multi-modal")
 async def analyze_multi_modal(request: MultiModalAnalysisRequest):
     """Run multi-modal analysis via the RAG pipeline"""
     try:
@@ -904,11 +938,76 @@ async def analyze_multi_modal(request: MultiModalAnalysisRequest):
     evidence_chain: Dict[str, Any] = {}
     if evidence_ids:
         try:
-            evidence_chain = await build_evidence_chain(evidence_ids)
-        except Exception as e:  # pragma: no cover - chain failures shouldn't crash
+            evidence_chain = await build_evidence_chain(evidence_ids)        except Exception as e:  # pragma: no cover - chain failures shouldn't crash
             logger.error(f"Evidence chain build failed: {e}")
-
+    
     return {"analysis": analysis, "evidence_chain": evidence_chain}
+
+
+@app.post("/api/v1/rag/query", response_model=TemporalRAGQueryResponse)
+async def temporal_rag_query(request: TemporalRAGQueryRequest):
+    """
+    Process temporal RAG query with chronological ordering and causality analysis
+    
+    This endpoint accepts a query event and returns similar events in chronological order
+    with an LLM-generated explanation emphasizing temporal flow and causality.
+    """
+    try:
+        # Validate and create QueryEvent from request
+        query_event_data = request.query_event
+        
+        # Ensure required fields are present
+        required_fields = ["camera_id", "timestamp", "label"]
+        for field in required_fields:
+            if field not in query_event_data:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Missing required field in query_event: {field}"
+                )
+        
+        # Create QueryEvent object
+        query_event = QueryEvent(
+            camera_id=query_event_data["camera_id"],
+            timestamp=query_event_data["timestamp"], 
+            label=query_event_data["label"],
+            bbox=query_event_data.get("bbox")        )
+          # Validate ISO 8601 timestamp format with timezone
+        try:
+            if not isinstance(query_event.timestamp, str):
+                raise ValueError("timestamp must be a string")
+            
+            # Check for proper ISO 8601 format with timezone
+            timestamp_str = query_event.timestamp
+            
+            # Must contain 'T' separator and timezone info (Z or +/-offset)
+            if 'T' not in timestamp_str:
+                raise ValueError("timestamp must use 'T' separator")
+            
+            if not (timestamp_str.endswith('Z') or '+' in timestamp_str[-6:] or '-' in timestamp_str[-6:]):
+                raise ValueError("timestamp must include timezone information")
+            
+            # Must be parseable as datetime
+            datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+            
+        except (ValueError, AttributeError, TypeError):
+            raise HTTPException(
+                status_code=400,
+                detail="timestamp must be in ISO 8601 format (e.g., '2025-06-06T10:30:00Z')"
+            )
+          # Process the temporal RAG query
+        result = await advanced_rag.rag_service.process_temporal_query(query_event, request.k)
+        
+        return TemporalRAGQueryResponse(
+            linked_explanation=result.linked_explanation,
+            retrieved_context=result.retrieved_context,
+            explanation_confidence=result.explanation_confidence
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing temporal RAG query: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @app.get("/health")

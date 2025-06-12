@@ -13,12 +13,16 @@ from datetime import datetime, timedelta
 import redis.asyncio as redis
 from enum import Enum
 
-from shared.logging import get_logger
+from shared.logging_config import configure_logging, get_logger
 from shared.metrics import instrument_app
 from shared.auth import get_current_user, TokenData
+from shared.middleware.rate_limit import WebSocketRateLimiter
 
-LOGGER = get_logger("websocket_service")
-app = FastAPI(title="Bidirectional WebSocket Service")
+LOGGER = configure_logging("websocket_service")
+app = FastAPI(
+    title="Bidirectional WebSocket Service",
+    openapi_prefix="/api/v1"
+)
 instrument_app(app, service_name="websocket_service")
 
 # CORS configuration
@@ -32,6 +36,10 @@ app.add_middleware(
 
 # Redis connection for pub/sub and session management
 redis_client = redis.from_url("redis://redis:6379", decode_responses=True)
+
+# WebSocket rate limiters for specialized endpoints
+events_limiter = WebSocketRateLimiter("30/minute")  # 30 messages per minute for events
+alerts_limiter = WebSocketRateLimiter("30/minute")  # 30 messages per minute for alerts
 
 class CommandType(str, Enum):
     # Camera Control Commands
@@ -121,11 +129,9 @@ class ConnectionManager:
             "user_id": user_id,
             "connected_at": datetime.utcnow(),
             "last_activity": datetime.utcnow(),
-            "message_count": 0
-        }
+            "message_count": 0        }
         
-        LOGGER.info("WebSocket connection established", 
-                   session_id=session_id, user_id=user_id)
+        LOGGER.info(f"WebSocket connection established - session_id: {session_id}, user_id: {user_id}")
     
     async def disconnect(self, session_id: str):
         """Handle WebSocket disconnection."""
@@ -140,13 +146,11 @@ class ConnectionManager:
                 self.user_sessions[user_id].discard(session_id)
                 if not self.user_sessions[user_id]:
                     del self.user_sessions[user_id]
-            
-            # Clean up session metadata
+              # Clean up session metadata
             if session_id in self.session_metadata:
                 del self.session_metadata[session_id]
             
-            LOGGER.info("WebSocket connection closed", 
-                       session_id=session_id, user_id=user_id)
+            LOGGER.info(f"WebSocket connection closed - session_id: {session_id}, user_id: {user_id}")
     
     async def send_message(self, session_id: str, message: WebSocketMessage):
         """Send message to specific session."""
@@ -157,16 +161,13 @@ class ConnectionManager:
                 message_dict['timestamp'] = message.timestamp.isoformat()
                 
                 await websocket.send_text(json.dumps(message_dict))
-                
-                # Update session activity
+                  # Update session activity
                 if session_id in self.session_metadata:
                     self.session_metadata[session_id]["last_activity"] = datetime.utcnow()
                     self.session_metadata[session_id]["message_count"] += 1
-                
                 return True
             except Exception as e:
-                LOGGER.error("Failed to send WebSocket message", 
-                           session_id=session_id, error=str(e))
+                LOGGER.error(f"Failed to send WebSocket message - session_id: {session_id}, error: {str(e)}")
                 await self.disconnect(session_id)
                 return False
         return False
@@ -253,10 +254,7 @@ class CommandHandler:
             )
         
         except Exception as e:
-            execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
-            LOGGER.error("Command execution failed", 
-                        command_type=command.command_type, 
-                        error=str(e), user_id=user_id)
+            execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000        LOGGER.error(f"Command execution failed - command_type: {command.command_type}, user_id: {user_id}, error: {str(e)}")
             
             return CommandResponse(
                 command_id=command_id,
@@ -531,7 +529,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str, token: str =
     except WebSocketDisconnect:
         await manager.disconnect(session_id)
     except Exception as e:
-        LOGGER.error("WebSocket error", session_id=session_id, error=str(e))
+        LOGGER.error(f"WebSocket error - session_id: {session_id}, error: {str(e)}")
         await manager.disconnect(session_id)
 
 async def handle_command_message(message_data: Dict[str, Any], session_id: str, user_id: str):
@@ -657,10 +655,9 @@ async def health():
     return {
         "status": "healthy",
         "active_connections": len(manager.active_connections),
-        "timestamp": datetime.utcnow().isoformat()
-    }
+        "timestamp": datetime.utcnow().isoformat()    }
 
-@app.get("/sessions")
+@app.get("/api/v1/sessions")
 async def get_active_sessions():
     """Get information about active WebSocket sessions."""
     return {
@@ -668,7 +665,7 @@ async def get_active_sessions():
         "total_count": len(manager.active_connections)
     }
 
-@app.post("/broadcast")
+@app.post("/api/v1/broadcast")
 async def broadcast_message(message: Dict[str, Any]):
     """Broadcast a message to all connected clients."""
     broadcast_msg = WebSocketMessage(
@@ -681,7 +678,7 @@ async def broadcast_message(message: Dict[str, Any]):
     sent_count = await manager.broadcast(broadcast_msg)
     return {"message_sent_to": sent_count, "total_sessions": len(manager.active_connections)}
 
-@app.post("/send/{user_id}")
+@app.post("/api/v1/send/{user_id}")
 async def send_to_user(user_id: str, message: Dict[str, Any]):
     """Send a message to all sessions of a specific user."""
     user_msg = WebSocketMessage(
@@ -718,7 +715,7 @@ async def periodic_status_broadcast():
                 await manager.broadcast(status_message)
                 
         except Exception as e:
-            LOGGER.error("Error in periodic status broadcast", error=str(e))
+            LOGGER.error(f"Error in periodic status broadcast - error: {str(e)}")
 
 # Start background tasks
 @app.on_event("startup")
@@ -732,6 +729,248 @@ async def shutdown_event():
     """Cleanup on shutdown."""
     await redis_client.close()
     LOGGER.info("Bidirectional WebSocket Service stopped")
+
+@app.websocket("/ws/v1/events/{session_id}")
+async def events_websocket_endpoint(websocket: WebSocket, session_id: str, token: str = None):
+    """Specialized WebSocket endpoint for real-time events with rate limiting (30 messages/min)."""
+    
+    # Authentication (simplified for demo)
+    user_id = "user_123"  # In production, extract from token
+    
+    await manager.connect(websocket, f"events_{session_id}", user_id)
+    
+    # Send welcome message for events endpoint
+    welcome_message = WebSocketMessage(
+        message_id=str(uuid.uuid4()),
+        message_type=MessageType.STATUS_UPDATE,
+        payload={
+            "status": "connected_to_events",
+            "session_id": session_id,
+            "user_id": user_id,
+            "endpoint": "events",
+            "rate_limit": "30 messages per minute",
+            "server_time": datetime.utcnow().isoformat()
+        },
+        timestamp=datetime.utcnow(),
+        user_id=user_id,
+        session_id=f"events_{session_id}"
+    )
+    await manager.send_message(f"events_{session_id}", welcome_message)
+    
+    try:
+        while True:
+            # Receive message from client
+            data = await websocket.receive_text()
+            
+            # Apply rate limiting
+            if not events_limiter.is_allowed(websocket):
+                error_message = {
+                    "error": "Rate limit exceeded",
+                    "message": "Too many messages. Limit: 30 messages per minute for events endpoint.",
+                    "retry_after": 60
+                }
+                await websocket.send_json(error_message)
+                continue
+            
+            try:
+                message_data = json.loads(data)
+                
+                # Handle event-specific messages
+                if message_data.get("message_type") == "event_subscription":
+                    # Handle event subscription requests
+                    event_types = message_data.get("event_types", [])
+                    response = {
+                        "message_type": "subscription_confirmed",
+                        "subscribed_events": event_types,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                    await websocket.send_json(response)
+                else:
+                    # Handle other event messages
+                    response = {
+                        "message_type": "event_processed",
+                        "original_message": message_data,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                    await websocket.send_json(response)
+                    
+            except json.JSONDecodeError as e:
+                error_message = {
+                    "error": "Invalid JSON format",
+                    "details": str(e),
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                await websocket.send_json(error_message)
+                
+    except WebSocketDisconnect:
+        await manager.disconnect(f"events_{session_id}")
+    except Exception as e:
+        print(f"Events WebSocket error - session_id: {session_id}, error: {str(e)}")
+        await manager.disconnect(f"events_{session_id}")
+
+@app.websocket("/ws/v1/alerts/{session_id}")
+async def alerts_websocket_endpoint(websocket: WebSocket, session_id: str, token: str = None):
+    """Specialized WebSocket endpoint for real-time alerts with rate limiting (30 messages/min)."""
+    
+    # Authentication (simplified for demo)
+    user_id = "user_123"  # In production, extract from token
+    
+    await manager.connect(websocket, f"alerts_{session_id}", user_id)
+    
+    # Send welcome message for alerts endpoint
+    welcome_message = WebSocketMessage(
+        message_id=str(uuid.uuid4()),
+        message_type=MessageType.STATUS_UPDATE,
+        payload={
+            "status": "connected_to_alerts",
+            "session_id": session_id,
+            "user_id": user_id,
+            "endpoint": "alerts",
+            "rate_limit": "30 messages per minute",
+            "server_time": datetime.utcnow().isoformat()
+        },
+        timestamp=datetime.utcnow(),
+        user_id=user_id,
+        session_id=f"alerts_{session_id}"
+    )
+    await manager.send_message(f"alerts_{session_id}", welcome_message)
+    
+    try:
+        while True:
+            # Receive message from client
+            data = await websocket.receive_text()
+            
+            # Apply rate limiting
+            if not alerts_limiter.is_allowed(websocket):
+                error_message = {
+                    "error": "Rate limit exceeded",
+                    "message": "Too many messages. Limit: 30 messages per minute for alerts endpoint.",
+                    "retry_after": 60
+                }
+                await websocket.send_json(error_message)
+                continue
+            
+            try:
+                message_data = json.loads(data)
+                
+                # Handle alert-specific messages
+                if message_data.get("message_type") == "alert_acknowledgment":
+                    # Handle alert acknowledgment
+                    alert_id = message_data.get("alert_id")
+                    response = {
+                        "message_type": "alert_acknowledged",
+                        "alert_id": alert_id,
+                        "acknowledged_by": user_id,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                    await websocket.send_json(response)
+                elif message_data.get("message_type") == "alert_filter":
+                    # Handle alert filtering requests
+                    filters = message_data.get("filters", {})
+                    response = {
+                        "message_type": "filter_applied",
+                        "active_filters": filters,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                    await websocket.send_json(response)
+                else:
+                    # Handle other alert messages
+                    response = {
+                        "message_type": "alert_processed",
+                        "original_message": message_data,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                    await websocket.send_json(response)
+                    
+            except json.JSONDecodeError as e:
+                error_message = {
+                    "error": "Invalid JSON format",
+                    "details": str(e),
+                    "timestamp": datetime.utcnow().isoformat()                }
+                await websocket.send_json(error_message)
+                
+    except WebSocketDisconnect:
+        await manager.disconnect(f"alerts_{session_id}")
+    except Exception as e:
+        print(f"Alerts WebSocket error - session_id: {session_id}, error: {str(e)}")
+        await manager.disconnect(f"alerts_{session_id}")
+
+# Backwards compatibility: Redirect old WebSocket endpoints to versioned ones
+@app.websocket("/ws/events/{session_id}")
+async def events_websocket_redirect(websocket: WebSocket, session_id: str, token: str = None):
+    """
+    Backwards compatibility redirect for /ws/events/{session_id} to /ws/v1/events/{session_id}
+    Provides seamless transition for existing WebSocket clients.
+    """
+    # Accept the connection first
+    await websocket.accept()
+    
+    # Send deprecation notice and redirect information
+    deprecation_message = {
+        "type": "deprecation_notice",
+        "message": "This WebSocket endpoint is deprecated. Please use /ws/v1/events/{session_id}",
+        "old_endpoint": f"/ws/events/{session_id}",
+        "new_endpoint": f"/ws/v1/events/{session_id}",
+        "timestamp": datetime.utcnow().isoformat(),
+        "action": "redirecting_automatically"
+    }
+    
+    try:
+        await websocket.send_json(deprecation_message)
+        await asyncio.sleep(0.1)  # Brief pause to ensure message is sent
+        
+        # Close with a redirect code and reason
+        await websocket.close(
+            code=3000,  # Custom code for redirect
+            reason=f"Redirecting to /ws/v1/events/{session_id}"
+        )
+        
+        LOGGER.info(f"WebSocket redirect: /ws/events/{session_id} -> /ws/v1/events/{session_id}")
+        
+    except Exception as e:
+        LOGGER.error(f"Error during WebSocket redirect for events endpoint: {e}")
+        try:
+            await websocket.close(code=1011, reason="Redirect failed")
+        except:
+            pass
+
+@app.websocket("/ws/alerts/{session_id}")  
+async def alerts_websocket_redirect(websocket: WebSocket, session_id: str, token: str = None):
+    """
+    Backwards compatibility redirect for /ws/alerts/{session_id} to /ws/v1/alerts/{session_id}
+    Provides seamless transition for existing WebSocket clients.
+    """
+    # Accept the connection first
+    await websocket.accept()
+    
+    # Send deprecation notice and redirect information
+    deprecation_message = {
+        "type": "deprecation_notice", 
+        "message": "This WebSocket endpoint is deprecated. Please use /ws/v1/alerts/{session_id}",
+        "old_endpoint": f"/ws/alerts/{session_id}",
+        "new_endpoint": f"/ws/v1/alerts/{session_id}",
+        "timestamp": datetime.utcnow().isoformat(),
+        "action": "redirecting_automatically"
+    }
+    
+    try:
+        await websocket.send_json(deprecation_message)
+        await asyncio.sleep(0.1)  # Brief pause to ensure message is sent
+        
+        # Close with a redirect code and reason
+        await websocket.close(
+            code=3000,  # Custom code for redirect  
+            reason=f"Redirecting to /ws/v1/alerts/{session_id}"
+        )
+        
+        LOGGER.info(f"WebSocket redirect: /ws/alerts/{session_id} -> /ws/v1/alerts/{session_id}")
+        
+    except Exception as e:
+        LOGGER.error(f"Error during WebSocket redirect for alerts endpoint: {e}")
+        try:
+            await websocket.close(code=1011, reason="Redirect failed")
+        except:
+            pass
 
 if __name__ == "__main__":
     import uvicorn

@@ -1,10 +1,11 @@
-pip-requirements
--e ../shared
 fastapi==0.104.1
 uvicorn==0.24.0
-pydantic==2.5.0
+slowapi==0.1.9
+pydantic>=2.8.0,<3.0.0
 redis==5.0.1
 openai==1.3.8
-weaviate-client==3.25.0
+weaviate-client>=4.0.0,<5.0.0
 requests==2.31.0
 python-dateutil==2.8.2
+python-json-logger>=2.0.0
+PyJWT>=2.0.0

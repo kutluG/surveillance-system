@@ -57,7 +57,6 @@ describe('Button Component', () => {
       backgroundColor: expect.any(String),
     });
   });
-
   it('applies correct size styles', () => {
     const { getByTestId } = render(
       <Button 
@@ -70,7 +69,7 @@ describe('Button Component', () => {
     
     const button = getByTestId('test-button');
     expect(button).toHaveStyle({
-      height: expect.any(Number),
+      minHeight: 56,
     });
   });
 

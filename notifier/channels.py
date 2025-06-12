@@ -9,9 +9,9 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Dict, Any, List
 import requests
-from shared.logging import get_logger
+from shared.logging_config import get_logger, log_context
 
-LOGGER = get_logger("notifier")
+logger = get_logger("notifier")
 
 class NotificationChannel(ABC):
     """Abstract base class for notification channels."""
@@ -52,10 +52,10 @@ class EmailChannel(NotificationChannel):
             server.send_message(msg)
             server.quit()
             
-            LOGGER.info("Email sent", recipients=recipients, subject=subject)
+            logger.info("Email sent", extra={recipients=recipients, subject=subject})
             
         except Exception as e:
-            LOGGER.error("Email send failed", error=str(e), recipients=recipients)
+            logger.error("Email send failed", error=str(e), recipients=recipients)
             raise
 
 class SlackChannel(NotificationChannel):
@@ -67,7 +67,7 @@ class SlackChannel(NotificationChannel):
     async def send(self, recipients: List[str], subject: str, message: str, metadata: Dict[str, Any] = None):
         """Send Slack notification."""
         if not self.webhook_url:
-            LOGGER.warning("Slack webhook URL not configured")
+            logger.warning("Slack webhook URL not configured")
             return
         
         try:
@@ -114,10 +114,10 @@ class SlackChannel(NotificationChannel):
             response = requests.post(self.webhook_url, json=slack_message, timeout=10)
             response.raise_for_status()
             
-            LOGGER.info("Slack notification sent", subject=subject)
+            logger.info("Slack notification sent", extra={subject=subject})
             
         except Exception as e:
-            LOGGER.error("Slack send failed", error=str(e), subject=subject)
+            logger.error("Slack send failed", error=str(e), subject=subject)
             raise
 
 class SMSChannel(NotificationChannel):
@@ -131,7 +131,7 @@ class SMSChannel(NotificationChannel):
     async def send(self, recipients: List[str], subject: str, message: str, metadata: Dict[str, Any] = None):
         """Send SMS notification."""
         if not all([self.account_sid, self.auth_token, self.from_number]):
-            LOGGER.warning("Twilio credentials not configured")
+            logger.warning("Twilio credentials not configured")
             return
         
         try:
@@ -150,10 +150,10 @@ class SMSChannel(NotificationChannel):
                     to=recipient
                 )
             
-            LOGGER.info("SMS sent", recipients=recipients, subject=subject)
+            logger.info("SMS sent", extra={recipients=recipients, subject=subject})
             
         except Exception as e:
-            LOGGER.error("SMS send failed", error=str(e), recipients=recipients)
+            logger.error("SMS send failed", error=str(e), recipients=recipients)
             raise
 
 class WebhookChannel(NotificationChannel):
@@ -166,7 +166,7 @@ class WebhookChannel(NotificationChannel):
     async def send(self, recipients: List[str], subject: str, message: str, metadata: Dict[str, Any] = None):
         """Send webhook notification."""
         if not self.webhook_url:
-            LOGGER.warning("Webhook URL not configured")
+            logger.warning("Webhook URL not configured")
             return
         
         try:
@@ -190,10 +190,10 @@ class WebhookChannel(NotificationChannel):
             )
             response.raise_for_status()
             
-            LOGGER.info("Webhook notification sent", url=self.webhook_url, subject=subject)
+            logger.info("Webhook notification sent", extra={url=self.webhook_url, subject=subject})
             
         except Exception as e:
-            LOGGER.error("Webhook send failed", error=str(e), url=self.webhook_url)
+            logger.error("Webhook send failed", error=str(e), url=self.webhook_url)
             raise
 
 # Channel registry

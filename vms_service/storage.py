@@ -6,9 +6,9 @@ import boto3
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
-from shared.logging import get_logger
+from shared.logging_config import get_logger, log_context
 
-LOGGER = get_logger("vms_service")
+logger = get_logger("vms_service")
 
 class VideoStorage(ABC):
     """Abstract base class for video storage backends."""
@@ -67,11 +67,11 @@ class S3VideoStorage(VideoStorage):
                 Metadata=s3_metadata
             )
             
-            LOGGER.info("Video clip stored", event_id=event_id, key=key)
+            logger.info("Video clip stored", extra={event_id=event_id, key=key})
             return f"s3://{self.bucket_name}/{key}"
             
         except Exception as e:
-            LOGGER.error("Failed to store video clip", event_id=event_id, error=str(e))
+            logger.error("Failed to store video clip", event_id=event_id, error=str(e))
             raise
     
     async def get_clip_url(self, event_id: str, expiry_minutes: int = 60) -> Optional[str]:
@@ -83,7 +83,7 @@ class S3VideoStorage(VideoStorage):
             try:
                 self.s3_client.head_object(Bucket=self.bucket_name, Key=key)
             except self.s3_client.exceptions.NoSuchKey:
-                LOGGER.warning("Video clip not found", event_id=event_id)
+                logger.warning("Video clip not found", event_id=event_id)
                 return None
             
             # Generate presigned URL
@@ -93,11 +93,11 @@ class S3VideoStorage(VideoStorage):
                 ExpiresIn=expiry_minutes * 60
             )
             
-            LOGGER.info("Generated presigned URL", event_id=event_id, expiry_minutes=expiry_minutes)
+            logger.info("Generated presigned URL", extra={event_id=event_id, expiry_minutes=expiry_minutes})
             return url
             
         except Exception as e:
-            LOGGER.error("Failed to generate clip URL", event_id=event_id, error=str(e))
+            logger.error("Failed to generate clip URL", event_id=event_id, error=str(e))
             return None
     
     async def delete_clip(self, event_id: str) -> bool:
@@ -105,11 +105,11 @@ class S3VideoStorage(VideoStorage):
         try:
             key = f"clips/{event_id}.mp4"
             self.s3_client.delete_object(Bucket=self.bucket_name, Key=key)
-            LOGGER.info("Video clip deleted", event_id=event_id)
+            logger.info("Video clip deleted", extra={event_id=event_id})
             return True
             
         except Exception as e:
-            LOGGER.error("Failed to delete video clip", event_id=event_id, error=str(e))
+            logger.error("Failed to delete video clip", event_id=event_id, error=str(e))
             return False
     
     async def list_clips(self, camera_id: str = None, start_date: datetime = None, end_date: datetime = None) -> list:
@@ -155,14 +155,13 @@ class S3VideoStorage(VideoStorage):
                     'timestamp': obj_timestamp,
                     'size_bytes': obj['Size'],
                     'last_modified': obj['LastModified'].isoformat(),
-                    'duration_seconds': metadata.get('duration', '0'),
-                })
+                    'duration_seconds': metadata.get('duration', '0'),                })
             
-            LOGGER.info("Listed video clips", count=len(clips), camera_id=camera_id)
+            logger.info("Listed video clips", extra={"count": len(clips), "camera_id": camera_id})
             return clips
             
         except Exception as e:
-            LOGGER.error("Failed to list video clips", error=str(e))
+            logger.error("Failed to list video clips", error=str(e))
             return []
 
 class LocalVideoStorage(VideoStorage):
@@ -188,11 +187,11 @@ class LocalVideoStorage(VideoStorage):
             with open(metadata_path, 'w') as f:
                 json.dump(metadata, f, default=str)
             
-            LOGGER.info("Video clip stored locally", event_id=event_id, path=filepath)
+            logger.info("Video clip stored locally", extra={event_id=event_id, path=filepath})
             return f"file://{filepath}"
             
         except Exception as e:
-            LOGGER.error("Failed to store video clip locally", event_id=event_id, error=str(e))
+            logger.error("Failed to store video clip locally", event_id=event_id, error=str(e))
             raise
     
     async def get_clip_url(self, event_id: str, expiry_minutes: int = 60) -> Optional[str]:
@@ -203,7 +202,7 @@ class LocalVideoStorage(VideoStorage):
         if os.path.exists(filepath):
             return f"{self.base_url}/{filename}"
         else:
-            LOGGER.warning("Video clip not found locally", event_id=event_id)
+            logger.warning("Video clip not found locally", event_id=event_id)
             return None
     
     async def delete_clip(self, event_id: str) -> bool:
@@ -219,11 +218,11 @@ class LocalVideoStorage(VideoStorage):
             if os.path.exists(metadata_path):
                 os.remove(metadata_path)
             
-            LOGGER.info("Video clip deleted locally", event_id=event_id)
+            logger.info("Video clip deleted locally", extra={event_id=event_id})
             return True
             
         except Exception as e:
-            LOGGER.error("Failed to delete local video clip", event_id=event_id, error=str(e))
+            logger.error("Failed to delete local video clip", event_id=event_id, error=str(e))
             return False
     
     async def list_clips(self, camera_id: str = None, start_date: datetime = None, end_date: datetime = None) -> list:
@@ -277,11 +276,11 @@ class LocalVideoStorage(VideoStorage):
                     'duration_seconds': metadata.get('duration_seconds', 0),
                 })
             
-            LOGGER.info("Listed local video clips", count=len(clips), camera_id=camera_id)
+            logger.info("Listed local video clips", extra={count=len(clips}), camera_id=camera_id)
             return clips
             
         except Exception as e:
-            LOGGER.error("Failed to list local video clips", error=str(e))
+            logger.error("Failed to list local video clips", error=str(e))
             return []
 
 # Storage factory

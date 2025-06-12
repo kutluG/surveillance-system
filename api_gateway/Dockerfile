@@ -1,5 +1,5 @@
 # API Gateway Dockerfile
-FROM python:3.11-slim as base
+FROM python:3.11-slim
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -10,16 +10,13 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy requirements first for better caching
-COPY api_gateway/requirements.txt .
+COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY api_gateway/ .
-
-# Copy shared modules if they exist
-COPY shared/ ./shared/ 2>/dev/null || true
+COPY . .
 
 # Expose port
 EXPOSE 8000

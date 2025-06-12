@@ -189,16 +189,14 @@ class ConfigValidator {
    */
   async validateDependencies() {
     const errors = [];
-    const warnings = [];
-
-    try {
-      // Check AsyncStorage
-      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+    const warnings = [];    try {
+      // Check SecureStorage
+      const secureStorage = require('./secureStorage').default;
       try {
-        await AsyncStorage.setItem('test_key', 'test_value');
-        await AsyncStorage.removeItem('test_key');
+        await secureStorage.setItem('test_key', 'test_value');
+        await secureStorage.removeItem('test_key');
       } catch (error) {
-        errors.push('AsyncStorage is not working properly');
+        errors.push('SecureStorage is not working properly');
       }
 
       // Check network capabilities

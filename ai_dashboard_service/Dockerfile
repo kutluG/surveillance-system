@@ -10,16 +10,13 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy requirements first for better caching
-COPY ai_dashboard_service/requirements.txt .
+COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY ai_dashboard_service/ .
-
-# Copy shared modules if they exist
-COPY shared/ ./shared/ 2>/dev/null || true
+COPY . .
 
 # Expose port
 EXPOSE 8000
