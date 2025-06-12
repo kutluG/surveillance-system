@@ -1,5 +1,5 @@
 # Drift Service Dependencies
-fastapi==0.104.1
+fastapi==0.115.12
 uvicorn[standard]==0.24.0
 pydantic==2.5.0
 aiokafka==0.9.0
