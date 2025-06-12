@@ -18,8 +18,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY rule_builder_service/ .
 
-# Copy shared modules if they exist
-COPY shared/ ./shared/ 2>/dev/null || true
+# Copy shared modules
+COPY shared/ ./shared/
 
 # Expose port
 EXPOSE 8000

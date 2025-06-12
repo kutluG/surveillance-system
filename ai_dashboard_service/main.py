@@ -31,6 +31,9 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text
 
+# Import shared middleware for rate limiting
+from shared.middleware import add_rate_limiting
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -720,7 +723,8 @@ report_generator = ReportGenerator()
 app = FastAPI(
     title="AI Dashboard Features",
     description="Advanced analytics, predictions, and intelligent reporting",
-    version="1.0.0"
+    version="1.0.0",
+    openapi_prefix="/api/v1"
 )
 
 # CORS middleware
@@ -732,8 +736,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add rate limiting middleware
+add_rate_limiting(app, service_name="ai_dashboard_service")
+
 # API Endpoints
-@app.post("/analytics/trends")
+@app.post("/api/v1/analytics/trends")
 async def analyze_trends(request: AnalyticsRequest):
     """Analyze trends in surveillance data"""
     try:
@@ -746,7 +753,7 @@ async def analyze_trends(request: AnalyticsRequest):
         logger.error(f"Error analyzing trends: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/analytics/anomalies")
+@app.post("/api/v1/analytics/anomalies")
 async def detect_anomalies(request: AnalyticsRequest):
     """Detect anomalies in surveillance data"""
     try:
@@ -760,7 +767,7 @@ async def detect_anomalies(request: AnalyticsRequest):
         logger.error(f"Error detecting anomalies: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/predictions")
+@app.post("/api/v1/predictions")
 async def generate_predictions(request: PredictionRequest):
     """Generate predictive analytics"""
     try:
@@ -770,7 +777,7 @@ async def generate_predictions(request: PredictionRequest):
         logger.error(f"Error generating predictions: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/reports/generate")
+@app.post("/api/v1/reports/generate")
 async def generate_report(request: ReportGenerationRequest):
     """Generate intelligent surveillance report"""
     try:
@@ -780,7 +787,7 @@ async def generate_report(request: ReportGenerationRequest):
         logger.error(f"Error generating report: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/reports/{report_id}")
+@app.get("/api/v1/reports/{report_id}")
 async def get_report(report_id: str):
     """Get generated report by ID"""
     try:
@@ -796,7 +803,7 @@ async def get_report(report_id: str):
         logger.error(f"Error retrieving report: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/insights/realtime")
+@app.get("/api/v1/insights/realtime")
 async def get_realtime_insights():
     """Get real-time AI insights"""
     try:
@@ -837,7 +844,7 @@ async def get_realtime_insights():
         logger.error(f"Error getting real-time insights: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/widgets/create")
+@app.post("/api/v1/widgets/create")
 async def create_widget(request: WidgetRequest):
     """Create a new dashboard widget"""
     try:
@@ -870,7 +877,7 @@ async def create_widget(request: WidgetRequest):
         logger.error(f"Error creating widget: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/widgets")
+@app.get("/api/v1/widgets")
 async def list_widgets():
     """List all dashboard widgets"""
     try:
@@ -888,7 +895,7 @@ async def list_widgets():
         logger.error(f"Error listing widgets: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/dashboard/summary")
+@app.get("/api/v1/dashboard/summary")
 async def get_dashboard_summary():
     """Get AI-powered dashboard summary"""
     try:

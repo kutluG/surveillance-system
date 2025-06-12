@@ -1,5 +1,6 @@
 fastapi
 uvicorn[standard]
+slowapi==0.1.9
 sqlalchemy
 psycopg2-binary
 openai
@@ -7,3 +8,8 @@ pydantic
 structlog
 prometheus_client
 PyJWT
+pytest
+pytest-asyncio
+python-dateutil
+regex
+python-json-logger>=2.0.0

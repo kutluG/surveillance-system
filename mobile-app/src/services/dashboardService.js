@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { API_CONFIG } from '../constants';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from '../utils/secureStorage';
 
 // Create axios instance for dashboard service
 const dashboardAPI = axios.create({
@@ -11,7 +11,7 @@ const dashboardAPI = axios.create({
 // Request interceptor to add auth token
 dashboardAPI.interceptors.request.use(
   async (config) => {
-    const token = await AsyncStorage.getItem('token');
+    const token = await secureStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -28,7 +28,7 @@ dashboardAPI.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       // Handle unauthorized - logout user
-      AsyncStorage.removeItem('token');
+      secureStorage.removeItem('token');
     }
     return Promise.reject(error);
   }

@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hard Example Annotation Tool</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .annotation-canvas {
+            position: relative;
+            max-width: 100%;
+            border: 2px solid #dee2e6;
+        }
+        .bbox-overlay {
+            position: absolute;
+            border: 2px solid #dc3545;
+            background: rgba(220, 53, 69, 0.1);
+            pointer-events: none;
+        }
+        .bbox-label {
+            position: absolute;
+            background: #dc3545;
+            color: white;
+            padding: 2px 6px;
+            font-size: 12px;
+            top: -20px;
+            left: 0;
+        }
+        .example-card {
+            transition: transform 0.2s;
+        }
+        .example-card:hover {
+            transform: translateY(-2px);
+        }
+        .confidence-badge {
+            font-size: 0.8em;
+        }
+        .stats-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-dark">
+        <div class="container-fluid">
+            <span class="navbar-brand">Hard Example Annotation Tool</span>
+            <span class="badge bg-warning text-dark">{{ pending_count }} Pending</span>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <div class="row">
+            <!-- Stats Panel -->
+            <div class="col-md-3">
+                <div class="card stats-card mb-4">
+                    <div class="card-body text-center">
+                        <h5 class="card-title">Annotation Queue</h5>
+                        <h2 id="pending-count">{{ pending_count }}</h2>
+                        <p class="card-text">Examples pending annotation</p>
+                    </div>
+                </div>
+                
+                <!-- Example List -->
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0">Pending Examples</h6>
+                    </div>
+                    <div class="card-body" id="examples-list" style="max-height: 500px; overflow-y: auto;">
+                        <div class="text-center">
+                            <div class="spinner-border" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Annotation Panel -->
+            <div class="col-md-9">
+                <div id="annotation-panel" class="card" style="display: none;">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 id="current-example-title">Annotating Example</h5>
+                        <div>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="skipExample()">Skip</button>
+                            <button class="btn btn-primary btn-sm" onclick="submitAnnotation()">Submit</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <!-- Image Annotation Area -->
+                                <div class="annotation-container">
+                                    <canvas id="annotation-canvas" class="annotation-canvas"></canvas>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <!-- Detection Details -->
+                                <h6>Original Detections</h6>
+                                <div id="original-detections"></div>
+                                
+                                <hr>
+                                
+                                <h6>Corrected Labels</h6>
+                                <div id="corrected-detections"></div>
+                                
+                                <hr>
+                                
+                                <!-- Annotation Form -->
+                                <form id="annotation-form">
+                                    <div class="mb-3">
+                                        <label for="annotator-id" class="form-label">Annotator ID</label>
+                                        <input type="text" class="form-control" id="annotator-id" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="quality-score" class="form-label">Quality Score</label>
+                                        <select class="form-control" id="quality-score">
+                                            <option value="1.0">Excellent (1.0)</option>
+                                            <option value="0.8">Good (0.8)</option>
+                                            <option value="0.6">Fair (0.6)</option>
+                                            <option value="0.4">Poor (0.4)</option>
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="notes" class="form-label">Notes (Optional)</label>
+                                        <textarea class="form-control" id="notes" rows="3"></textarea>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Welcome Message -->
+                <div id="welcome-panel" class="card">
+                    <div class="card-body text-center">
+                        <h4>Welcome to the Hard Example Annotation Tool</h4>
+                        <p class="text-muted">Select an example from the left panel to start annotating.</p>
+                        <div class="mt-4">
+                            <h6>Instructions:</h6>
+                            <ul class="list-unstyled text-start" style="max-width: 600px; margin: 0 auto;">
+                                <li>• Click on examples in the left panel to load them</li>
+                                <li>• Review the original detections and their confidence scores</li>
+                                <li>• Correct any misclassifications or add missing labels</li>
+                                <li>• Submit your annotations to improve the model</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentExample = null;
+        let correctedDetections = [];
+
+        // Load examples on page load
+        window.addEventListener('load', loadExamples);
+        
+        // Refresh examples every 30 seconds
+        setInterval(loadExamples, 30000);
+
+        async function loadExamples() {
+            try {
+                const response = await fetch('/api/examples');
+                const data = await response.json();
+                
+                document.getElementById('pending-count').textContent = data.total;
+                
+                const examplesList = document.getElementById('examples-list');
+                examplesList.innerHTML = '';
+                
+                if (data.examples.length === 0) {
+                    examplesList.innerHTML = '<p class="text-muted text-center">No pending examples</p>';
+                    return;
+                }
+                
+                data.examples.forEach(example => {
+                    const card = createExampleCard(example);
+                    examplesList.appendChild(card);
+                });
+            } catch (error) {
+                console.error('Failed to load examples:', error);
+            }
+        }
+
+        function createExampleCard(example) {
+            const card = document.createElement('div');
+            card.className = 'card example-card mb-2';
+            card.style.cursor = 'pointer';
+            card.onclick = () => loadExample(example.event_id);
+            
+            const reasonBadge = getReason(example.reason);
+            const timestamp = new Date(example.timestamp).toLocaleString();
+            
+            card.innerHTML = `
+                <div class="card-body p-3">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <h6 class="card-title mb-1">${example.camera_id}</h6>
+                            <small class="text-muted">${timestamp}</small>
+                        </div>
+                        <span class="badge bg-warning text-dark">${reasonBadge}</span>
+                    </div>
+                    <div class="mt-2">
+                        ${Object.entries(example.confidence_scores || {}).map(([cls, conf]) => 
+                            `<span class="badge ${conf < 0.5 ? 'bg-danger' : 'bg-warning'} confidence-badge me-1">
+                                ${cls}: ${conf.toFixed(2)}
+                            </span>`
+                        ).join('')}
+                    </div>
+                </div>
+            `;
+            
+            return card;
+        }
+
+        function getReason(reason) {
+            if (reason.includes('Low confidence')) {
+                return 'Low Conf';
+            }
+            return reason.substring(0, 10) + '...';
+        }
+
+        async function loadExample(eventId) {
+            try {
+                const response = await fetch(`/api/examples/${eventId}`);
+                const example = await response.json();
+                
+                currentExample = example;
+                correctedDetections = [];
+                
+                // Show annotation panel
+                document.getElementById('welcome-panel').style.display = 'none';
+                document.getElementById('annotation-panel').style.display = 'block';
+                
+                // Update title
+                document.getElementById('current-example-title').textContent = 
+                    `${example.camera_id} - ${new Date(example.timestamp).toLocaleString()}`;
+                
+                // Load original detections
+                displayOriginalDetections(example.detections || []);
+                
+                // Initialize corrected detections
+                initializeCorrectedDetections(example.detections || []);
+                
+                // TODO: Load and display frame image
+                // For now, we'll show a placeholder since frame_data is placeholder
+                displayPlaceholderImage();
+                
+            } catch (error) {
+                console.error('Failed to load example:', error);
+                alert('Failed to load example');
+            }
+        }
+
+        function displayOriginalDetections(detections) {
+            const container = document.getElementById('original-detections');
+            container.innerHTML = '';
+            
+            detections.forEach((det, idx) => {
+                const detDiv = document.createElement('div');
+                detDiv.className = 'card mb-2';
+                detDiv.innerHTML = `
+                    <div class="card-body p-2">
+                        <div class="d-flex justify-content-between">
+                            <strong>${det.class_name}</strong>
+                            <span class="badge ${det.confidence < 0.5 ? 'bg-danger' : 'bg-warning'}">
+                                ${det.confidence.toFixed(3)}
+                            </span>
+                        </div>
+                        <small class="text-muted">
+                            BBox: ${det.bbox ? `[${det.bbox.x1.toFixed(1)}, ${det.bbox.y1.toFixed(1)}, ${det.bbox.x2.toFixed(1)}, ${det.bbox.y2.toFixed(1)}]` : 'N/A'}
+                        </small>
+                    </div>
+                `;
+                container.appendChild(detDiv);
+            });
+        }
+
+        function initializeCorrectedDetections(detections) {
+            correctedDetections = detections.map(det => ({
+                bbox: det.bbox,
+                class_name: det.class_name,
+                confidence: det.confidence,
+                corrected_class: det.class_name,
+                is_correct: true
+            }));
+            
+            displayCorrectedDetections();
+        }
+
+        function displayCorrectedDetections() {
+            const container = document.getElementById('corrected-detections');
+            container.innerHTML = '';
+            
+            correctedDetections.forEach((det, idx) => {
+                const detDiv = document.createElement('div');
+                detDiv.className = 'card mb-2';
+                detDiv.innerHTML = `
+                    <div class="card-body p-2">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" ${det.is_correct ? 'checked' : ''} 
+                                   onchange="updateDetectionCorrectness(${idx}, this.checked)">
+                            <label class="form-check-label">
+                                <strong>${det.class_name}</strong>
+                            </label>
+                        </div>
+                        <div class="mt-2">
+                            <select class="form-control form-control-sm" 
+                                    onchange="updateDetectionClass(${idx}, this.value)"
+                                    ${det.is_correct ? 'disabled' : ''}>
+                                <option value="person" ${det.corrected_class === 'person' ? 'selected' : ''}>Person</option>
+                                <option value="vehicle" ${det.corrected_class === 'vehicle' ? 'selected' : ''}>Vehicle</option>
+                                <option value="face" ${det.corrected_class === 'face' ? 'selected' : ''}>Face</option>
+                                <option value="object" ${det.corrected_class === 'object' ? 'selected' : ''}>Object</option>
+                            </select>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(detDiv);
+            });
+        }
+
+        function updateDetectionCorrectness(idx, isCorrect) {
+            correctedDetections[idx].is_correct = isCorrect;
+            if (isCorrect) {
+                correctedDetections[idx].corrected_class = correctedDetections[idx].class_name;
+            }
+            displayCorrectedDetections();
+        }
+
+        function updateDetectionClass(idx, newClass) {
+            correctedDetections[idx].corrected_class = newClass;
+        }
+
+        function displayPlaceholderImage() {
+            const canvas = document.getElementById('annotation-canvas');
+            const ctx = canvas.getContext('2d');
+            
+            canvas.width = 640;
+            canvas.height = 480;
+            
+            // Draw placeholder
+            ctx.fillStyle = '#f8f9fa';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#6c757d';
+            ctx.font = '24px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('Frame Preview Placeholder', canvas.width/2, canvas.height/2);
+            ctx.font = '16px Arial';
+            ctx.fillText('(Frame data integration pending)', canvas.width/2, canvas.height/2 + 30);
+        }
+
+        async function submitAnnotation() {
+            if (!currentExample) return;
+            
+            const annotatorId = document.getElementById('annotator-id').value;
+            const qualityScore = parseFloat(document.getElementById('quality-score').value);
+            const notes = document.getElementById('notes').value;
+            
+            if (!annotatorId) {
+                alert('Please enter your annotator ID');
+                return;
+            }
+            
+            try {
+                const formData = new FormData();
+                formData.append('annotator_id', annotatorId);
+                formData.append('quality_score', qualityScore);
+                if (notes) formData.append('notes', notes);
+                
+                const response = await fetch(`/api/examples/${currentExample.event_id}/label`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        corrected_detections: correctedDetections,
+                        annotator_id: annotatorId,
+                        quality_score: qualityScore,
+                        notes: notes
+                    })
+                });
+                
+                if (response.ok) {
+                    alert('Annotation submitted successfully!');
+                    clearCurrentExample();
+                    loadExamples();
+                } else {
+                    alert('Failed to submit annotation');
+                }
+            } catch (error) {
+                console.error('Failed to submit annotation:', error);
+                alert('Failed to submit annotation');
+            }
+        }
+
+        async function skipExample() {
+            if (!currentExample) return;
+            
+            if (confirm('Are you sure you want to skip this example?')) {
+                try {
+                    const response = await fetch(`/api/examples/${currentExample.event_id}`, {
+                        method: 'DELETE'
+                    });
+                    
+                    if (response.ok) {
+                        clearCurrentExample();
+                        loadExamples();
+                    } else {
+                        alert('Failed to skip example');
+                    }
+                } catch (error) {
+                    console.error('Failed to skip example:', error);
+                    alert('Failed to skip example');
+                }
+            }
+        }
+
+        function clearCurrentExample() {
+            currentExample = null;
+            correctedDetections = [];
+            document.getElementById('annotation-panel').style.display = 'none';
+            document.getElementById('welcome-panel').style.display = 'block';
+            document.getElementById('annotation-form').reset();
+        }
+    </script>
+</body>
+</html>

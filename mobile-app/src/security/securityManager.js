@@ -3,7 +3,7 @@
  * Implements security best practices for the surveillance app
  */
 import { Alert, Platform } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from '../utils/secureStorage';
 import DeviceInfo from 'react-native-device-info';
 
 class SecurityManager {
@@ -329,11 +329,10 @@ class SecurityManager {
 
   /**
    * Logout user
-   */
-  async logoutUser() {
+   */  async logoutUser() {
     try {
       // Clear sensitive data
-      await AsyncStorage.multiRemove(['auth_token', 'user_data', 'session_data']);
+      await secureStorage.multiRemove(['auth_token', 'user_data', 'session_data']);
       
       // Navigate to login screen
       // This would be handled by the navigation service
@@ -363,11 +362,10 @@ class SecurityManager {
 
   /**
    * Secure storage operations
-   */
-  async secureStore(key, value) {
+   */  async secureStore(key, value) {
     try {
       const encryptedValue = await this.encryptData(JSON.stringify(value));
-      await AsyncStorage.setItem(`secure_${key}`, encryptedValue);
+      await secureStorage.setItem(`secure_${key}`, encryptedValue);
     } catch (error) {
       console.error('❌ Secure storage failed:', error);
       throw error;
@@ -376,7 +374,7 @@ class SecurityManager {
 
   async secureRetrieve(key) {
     try {
-      const encryptedValue = await AsyncStorage.getItem(`secure_${key}`);
+      const encryptedValue = await secureStorage.getItem(`secure_${key}`);
       if (!encryptedValue) return null;
       
       const decryptedValue = await this.decryptData(encryptedValue);

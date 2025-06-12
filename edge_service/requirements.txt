@@ -2,6 +2,9 @@
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 
+# Rate limiting
+slowapi==0.1.9
+
 # Computer vision and image processing
 opencv-python==4.8.1.78
 numpy==1.24.3
@@ -9,8 +12,15 @@ numpy==1.24.3
 # MQTT communication
 paho-mqtt==1.6.1
 
+# Kafka for hard example publishing
+kafka-python==2.0.2
+
 # Monitoring and metrics
 prometheus-client==0.19.0
+
+# Structured logging
+python-json-logger>=2.0.0
+PyJWT>=2.0.0
 
 # Logging
 structlog==23.2.0
@@ -27,9 +37,6 @@ requests==2.31.0
 
 # Additional utilities
 python-multipart==0.0.6
-
-# Shared package
--e ../shared
 
 # Observability dependencies
 opentelemetry-api>=1.20.0

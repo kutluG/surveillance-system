@@ -9,11 +9,10 @@ class EnvironmentConfig {
     this.environment = Config.ENV || 'development';
     this.initializeConfig();
   }
-
   initializeConfig() {
     // Base configuration that can be overridden by environment
     this.config = {
-      API_BASE_URL: Config.API_BASE_URL || 'http://localhost',
+      API_BASE_URL: Config.API_BASE_URL || 'http://localhost:8000',
       WEBSOCKET_URL: Config.WEBSOCKET_URL || 'ws://localhost:8002',
       TIMEOUT: parseInt(Config.TIMEOUT || '10000'),
       DEBUG: Config.DEBUG === 'true',
@@ -44,14 +43,15 @@ class EnvironmentConfig {
     this.config.RULEGEN_URL = this.buildServiceUrl('RULEGEN');
     this.config.NOTIFIER_URL = this.buildServiceUrl('NOTIFIER');
   }
-
   buildServiceUrl(serviceName) {
     const port = this.config.PORTS[serviceName];
     if (this.environment === 'production') {
       // In production, all services are behind a load balancer
       return this.config.API_BASE_URL;
     }
-    return `${this.config.API_BASE_URL}:${port}`;
+    // Parse the base URL to replace the port
+    const baseUrl = new URL(this.config.API_BASE_URL);
+    return `${baseUrl.protocol}//${baseUrl.hostname}:${port}`;
   }
 
   get(key) {
@@ -77,10 +77,22 @@ class EnvironmentConfig {
   getLogLevel() {
     return this.config.LOG_LEVEL;
   }
-
   // Get all configuration for debugging
   getAllConfig() {
     return { ...this.config };
+  }
+
+  // URL building utilities
+  buildApiUrl(path) {
+    // Ensure path starts with /
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+    return `${this.config.API_BASE_URL}${normalizedPath}`;
+  }
+
+  buildWebSocketUrl(path) {
+    // Ensure path starts with /
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+    return `${this.config.WEBSOCKET_URL}/ws${normalizedPath}`;
   }
 }
 

@@ -3,33 +3,27 @@ import { Link, useLocation } from 'react-router-dom';
 import { 
   Bars3Icon, 
   XMarkIcon,
-  CameraIcon,
-  ChartBarIcon,
-  BellIcon,
-  CogIcon,
-  DocumentTextIcon,
   HomeIcon,
-  UserIcon,
-  ArrowRightOnRectangleIcon
+  InformationCircleIcon,
+  StarIcon,
+  CurrencyDollarIcon,
+  DocumentTextIcon,
+  EnvelopeIcon,
+  QuestionMarkCircleIcon
 } from '@heroicons/react/24/outline';
-import { useApp } from '../contexts/AppContext';
-import LoginModal from './LoginModal';
 
 const navigation = [
   { name: 'Home', href: '/', icon: HomeIcon },
-  { name: 'Dashboard', href: '/dashboard', icon: ChartBarIcon },
-  { name: 'Cameras', href: '/cameras', icon: CameraIcon },
-  { name: 'Alerts', href: '/alerts', icon: BellIcon },
-  { name: 'Analytics', href: '/analytics', icon: ChartBarIcon },
-  { name: 'Settings', href: '/settings', icon: CogIcon },
+  { name: 'About', href: '/about', icon: InformationCircleIcon },
+  { name: 'Features', href: '/features', icon: StarIcon },
+  { name: 'Pricing', href: '/pricing', icon: CurrencyDollarIcon },
   { name: 'Docs', href: '/docs', icon: DocumentTextIcon },
-  { name: 'Pricing', href: '/pricing', icon: DocumentTextIcon },
+  { name: 'Contact', href: '/contact', icon: EnvelopeIcon },
+  { name: 'FAQ', href: '/faq', icon: QuestionMarkCircleIcon },
 ];
 
 export default function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [showLoginModal, setShowLoginModal] = useState(false);
-  const { isAuthenticated, user, logout, connectionStatus } = useApp();
   const location = useLocation();
 
   return (
@@ -40,11 +34,11 @@ export default function Navbar() {
           <div className="flex items-center">
             <Link to="/" className="flex items-center space-x-2">
               <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
-                <CameraIcon className="w-5 h-5 text-white" />
+                <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
+                </svg>
               </div>
-              <span className="text-xl font-bold text-gray-900">
-                SurveillanceAI
-              </span>
+              <span className="font-bold text-xl text-gray-900">SurveillanceAI</span>
             </Link>
           </div>
 
@@ -56,7 +50,7 @@ export default function Navbar() {
                 <Link
                   key={item.name}
                   to={item.href}
-                  className={`flex items-center space-x-1 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 ${
+                  className={`flex items-center space-x-1 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                     isActive
                       ? 'text-primary-600 bg-primary-50'
                       : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
@@ -67,52 +61,22 @@ export default function Navbar() {
                 </Link>
               );
             })}
-          </div>          {/* CTA Button or User Menu */}
+          </div>
+
+          {/* CTA Buttons */}
           <div className="hidden md:flex items-center space-x-4">
-            {/* Connection Status Indicator */}
-            {isAuthenticated && (
-              <div className="flex items-center space-x-2">
-                <div className={`w-2 h-2 rounded-full ${
-                  connectionStatus === 'connected' ? 'bg-green-500' : 
-                  connectionStatus === 'error' ? 'bg-red-500' : 'bg-yellow-500'
-                }`}></div>
-                <span className="text-xs text-gray-500">
-                  {connectionStatus === 'connected' ? 'Live' : 
-                   connectionStatus === 'error' ? 'Error' : 'Connecting...'}
-                </span>
-              </div>
-            )}
-            
-            {isAuthenticated ? (
-              <>
-                <div className="flex items-center space-x-2 text-sm text-gray-700">
-                  <UserIcon className="w-4 h-4" />
-                  <span>Welcome, {user?.name || user?.username}</span>
-                </div>
-                <button 
-                  onClick={logout}
-                  className="flex items-center space-x-1 px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 border border-gray-300 rounded-md hover:bg-gray-50"
-                >
-                  <ArrowRightOnRectangleIcon className="w-4 h-4" />
-                  <span>Sign Out</span>
-                </button>
-              </>
-            ) : (
-              <>
-                <button 
-                  onClick={() => setShowLoginModal(true)}
-                  className="btn-secondary"
-                >
-                  Sign In
-                </button>
-                <button 
-                  onClick={() => setShowLoginModal(true)}
-                  className="btn-primary"
-                >
-                  Get Started
-                </button>
-              </>
-            )}
+            <Link 
+              to="/contact"
+              className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+            >
+              Contact Sales
+            </Link>
+            <Link 
+              to="/pricing"
+              className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-md transition-colors"
+            >
+              Get Started
+            </Link>
           </div>
 
           {/* Mobile menu button */}
@@ -152,47 +116,27 @@ export default function Navbar() {
                   <item.icon className="w-5 h-5" />
                   <span>{item.name}</span>
                 </Link>
-              );            })}
+              );
+            })}
             <div className="pt-4 space-y-2">
-              {isAuthenticated ? (
-                <>
-                  <div className="px-3 py-2 text-sm text-gray-700">
-                    Welcome, {user?.name || user?.username}
-                  </div>
-                  <button 
-                    onClick={logout}
-                    className="w-full flex items-center justify-center space-x-1 px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 border border-gray-300 rounded-md hover:bg-gray-50"
-                  >
-                    <ArrowRightOnRectangleIcon className="w-4 h-4" />
-                    <span>Sign Out</span>
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button 
-                    onClick={() => setShowLoginModal(true)}
-                    className="w-full btn-secondary"
-                  >
-                    Sign In
-                  </button>
-                  <button 
-                    onClick={() => setShowLoginModal(true)}
-                    className="w-full btn-primary"
-                  >
-                    Get Started
-                  </button>
-                </>
-              )}
+              <Link 
+                to="/contact"
+                className="w-full flex items-center justify-center px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 border border-gray-300 rounded-md hover:bg-gray-50"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                Contact Sales
+              </Link>
+              <Link 
+                to="/pricing"
+                className="w-full flex items-center justify-center px-3 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-md"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                Get Started
+              </Link>
             </div>
           </div>
         </div>
       )}
-      
-      {/* Login Modal */}
-      <LoginModal 
-        isOpen={showLoginModal} 
-        onClose={() => setShowLoginModal(false)} 
-      />
     </nav>
   );
 }

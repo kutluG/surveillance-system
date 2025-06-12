@@ -8,7 +8,7 @@ import {
   Alert,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from '../utils/secureStorage';
 import { COLORS, SIZES, FONTS } from '../constants';
 import performanceMonitor from '../utils/performanceMonitor';
 
@@ -72,8 +72,7 @@ class ErrorBoundary extends React.Component {
           environment: __DEV__ ? 'development' : 'production',
         },
       };
-      
-      const existingErrors = await AsyncStorage.getItem('@error_reports');
+        const existingErrors = await secureStorage.getItem('@error_reports');
       const errors = existingErrors ? JSON.parse(existingErrors) : [];
       
       errors.push(errorReport);
@@ -83,7 +82,7 @@ class ErrorBoundary extends React.Component {
         errors.splice(0, errors.length - 10);
       }
       
-      await AsyncStorage.setItem('@error_reports', JSON.stringify(errors));
+      await secureStorage.setItem('@error_reports', JSON.stringify(errors));
       console.log('💾 Error report saved to storage');
     } catch (persistError) {
       console.error('❌ Failed to persist error:', persistError);
@@ -150,12 +149,11 @@ class ErrorBoundary extends React.Component {
       ]
     );
   };
-
   clearCacheAndRestart = async () => {
     try {
-      // Clear AsyncStorage
-      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
-      await AsyncStorage.clear();
+      // Clear secure storage
+      const secureStorage = require('../utils/secureStorage').default;
+      await secureStorage.clear();
       
       // Restart app
       const RNRestart = require('react-native-restart').default;
@@ -354,7 +352,7 @@ export const withErrorBoundary = (WrappedComponent, errorBoundaryProps = {}) => 
 // Utility function to clear stored error reports
 export const clearErrorReports = async () => {
   try {
-    await AsyncStorage.removeItem('@error_reports');
+    await secureStorage.removeItem('@error_reports');
     console.log('🧹 Error reports cleared');
   } catch (error) {
     console.error('❌ Failed to clear error reports:', error);
@@ -364,7 +362,7 @@ export const clearErrorReports = async () => {
 // Utility function to get stored error reports
 export const getErrorReports = async () => {
   try {
-    const reports = await AsyncStorage.getItem('@error_reports');
+    const reports = await secureStorage.getItem('@error_reports');
     return reports ? JSON.parse(reports) : [];
   } catch (error) {
     console.error('❌ Failed to get error reports:', error);

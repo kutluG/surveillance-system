@@ -9,19 +9,32 @@ import uuid
 from datetime import datetime, timedelta
 import redis
 
-from shared.logging import get_logger
+from shared.logging_config import configure_logging, get_logger, log_context
+from shared.audit_middleware import add_audit_middleware
 from shared.metrics import instrument_app
 from shared.models import QueryResult
 from shared.auth import get_current_user, TokenData
+from shared.middleware import add_rate_limiting
 
-from weaviate_client import semantic_search
+from .weaviate_client import semantic_search
 from clip_store import get_clip_url
-from conversation_manager import ConversationManager
+from .conversation_manager import ConversationManager
 from llm_client import generate_conversational_response, generate_follow_up_questions
 
-LOGGER = get_logger("enhanced_prompt_service")
-app = FastAPI(title="Enhanced Prompt Service")
+# Configure logging first
+logger = configure_logging("enhanced_prompt_service")
+
+app = FastAPI(
+    title="Enhanced Prompt Service",
+    openapi_prefix="/api/v1"
+)
+
+# Add audit middleware
+add_audit_middleware(app, service_name="enhanced_prompt_service")
 instrument_app(app, service_name="enhanced_prompt_service")
+
+# Add rate limiting middleware
+add_rate_limiting(app, service_name="enhanced_prompt_service")
 
 # Redis for conversation memory
 redis_client = redis.Redis(host='redis', port=6379, decode_responses=True)
@@ -52,13 +65,13 @@ class ProactiveInsightRequest(BaseModel):
 async def health():
     return {"status": "ok"}
 
-@app.post("/conversation", response_model=ConversationResponse)
+@app.post("/api/v1/conversation", response_model=ConversationResponse)
 async def enhanced_conversation(
     req: ConversationRequest,
     current_user: TokenData = Depends(get_current_user)
 ):
     """Enhanced conversational interface with context and follow-ups."""
-    LOGGER.info("Enhanced conversation request", 
+    logger.info("Enhanced conversation request", 
                 query=req.query, 
                 conversation_id=req.conversation_id,
                 user=current_user.sub)
@@ -157,7 +170,7 @@ async def enhanced_conversation(
             }
         )
         
-        LOGGER.info("Enhanced conversation response generated",
+        logger.info("Enhanced conversation response generated",
                    conversation_id=conversation["id"],
                    response_type=ai_response["type"],
                    confidence=ai_response["confidence"])
@@ -165,16 +178,16 @@ async def enhanced_conversation(
         return response
         
     except Exception as e:
-        LOGGER.error("Enhanced conversation failed", error=str(e))
+        logger.error("Enhanced conversation failed", error=str(e))
         raise HTTPException(status_code=500, detail="Conversation processing failed")
 
-@app.get("/proactive-insights", response_model=List[ConversationResponse])
+@app.get("/api/v1/proactive-insights", response_model=List[ConversationResponse])
 async def get_proactive_insights(
     req: ProactiveInsightRequest = ProactiveInsightRequest(),
     current_user: TokenData = Depends(get_current_user)
 ):
     """Generate proactive insights about system status and anomalies."""
-    LOGGER.info("Proactive insights request", 
+    logger.info("Proactive insights request", 
                 time_range=req.time_range,
                 user=current_user.sub)
     
@@ -209,15 +222,14 @@ async def get_proactive_insights(
                 }
             )
             responses.append(response)
-        
-        LOGGER.info("Proactive insights generated", count=len(responses))
+          logger.info("Proactive insights generated", count=len(responses))
         return responses
         
     except Exception as e:
-        LOGGER.error("Proactive insights failed", error=str(e))
+        logger.error("Proactive insights failed", error=str(e))
         raise HTTPException(status_code=500, detail="Insights generation failed")
 
-@app.get("/conversation/{conversation_id}/history")
+@app.get("/api/v1/conversation/{conversation_id}/history")
 async def get_conversation_history(
     conversation_id: str,
     limit: int = 50,
@@ -231,10 +243,10 @@ async def get_conversation_history(
         )
         return {"conversation_id": conversation_id, "messages": messages}
     except Exception as e:
-        LOGGER.error("Failed to get conversation history", error=str(e))
+        logger.error("Failed to get conversation history", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to retrieve conversation history")
 
-@app.delete("/conversation/{conversation_id}")
+@app.delete("/api/v1/conversation/{conversation_id}")
 async def delete_conversation(
     conversation_id: str,
     current_user: TokenData = Depends(get_current_user)
@@ -244,7 +256,7 @@ async def delete_conversation(
         await conversation_manager.delete_conversation(conversation_id)
         return {"message": "Conversation deleted successfully"}
     except Exception as e:
-        LOGGER.error("Failed to delete conversation", error=str(e))
+        logger.error("Failed to delete conversation", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to delete conversation")
 
 async def enhanced_semantic_search(query: str, conversation_history: List[Dict], limit: int = 5):
@@ -277,7 +289,7 @@ async def enhanced_semantic_search(query: str, conversation_history: List[Dict],
         return results
         
     except Exception as e:
-        LOGGER.error("Enhanced semantic search failed", error=str(e))
+        logger.error("Enhanced semantic search failed", error=str(e))
         # Fallback to basic search
         return semantic_search(query, limit=limit)
 
@@ -341,7 +353,7 @@ async def analyze_system_patterns(
                 insights.append(prediction_insight)
                 
     except Exception as e:
-        LOGGER.error("Pattern analysis failed", error=str(e))
+        logger.error("Pattern analysis failed", error=str(e))
         
     return insights
 

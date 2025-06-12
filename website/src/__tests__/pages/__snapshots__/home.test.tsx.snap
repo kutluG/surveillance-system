@@ -1,0 +1,255 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`Home Page renders home page correctly 1`] = `
+<div>
+  <div
+    class="flex flex-col"
+  >
+    <section
+      class="relative overflow-hidden bg-gradient-to-b from-background to-muted/20 px-6 py-24 sm:py-32 lg:px-8"
+    >
+      <div
+        class="mx-auto max-w-2xl text-center"
+      >
+        <h1
+          class="text-4xl font-bold tracking-tight text-foreground sm:text-6xl"
+        >
+          AI-Powered Video Surveillance,
+           
+          <span
+            class="text-primary"
+          >
+            Simplified
+          </span>
+        </h1>
+        <p
+          class="mt-6 text-lg leading-8 text-muted-foreground"
+        >
+          Transform your security infrastructure with intelligent monitoring that understands context, detects threats in real-time, and adapts to your unique requirements while maintaining complete privacy compliance.
+        </p>
+        <div
+          class="mt-10 flex items-center justify-center gap-x-6"
+        >
+          <a
+            class="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-11 rounded-md px-8"
+            href="/contact"
+          >
+            Get Started
+          </a>
+          <a
+            class="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-11 rounded-md px-8"
+            href="/services"
+          >
+            Learn More
+          </a>
+        </div>
+      </div>
+    </section>
+    <section
+      class="py-24 sm:py-32"
+    >
+      <div
+        class="mx-auto max-w-7xl px-6 lg:px-8"
+      >
+        <div
+          class="mx-auto max-w-2xl text-center"
+        >
+          <h2
+            class="text-3xl font-bold tracking-tight text-foreground sm:text-4xl"
+          >
+            Why Choose SecureWatch AI?
+          </h2>
+          <p
+            class="mt-4 text-lg text-muted-foreground"
+          >
+            Our advanced AI technology provides unmatched security monitoring capabilities
+          </p>
+        </div>
+        <div
+          class="mx-auto mt-16 max-w-2xl sm:mt-20 lg:mt-24 lg:max-w-none"
+        >
+          <dl
+            class="grid max-w-xl grid-cols-1 gap-x-8 gap-y-16 lg:max-w-none lg:grid-cols-3"
+          >
+            <div
+              class="rounded-lg border bg-card text-card-foreground shadow-sm flex flex-col items-center text-center p-6"
+            >
+              <div
+                class="flex flex-col space-y-1.5 p-6"
+              >
+                <div
+                  class="flex h-16 w-16 items-center justify-center rounded-lg bg-primary/10 mx-auto mb-4"
+                >
+                  <svg
+                    class="lucide lucide-alert-triangle h-8 w-8 text-primary"
+                    fill="none"
+                    height="24"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    viewBox="0 0 24 24"
+                    width="24"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"
+                    />
+                    <path
+                      d="M12 9v4"
+                    />
+                    <path
+                      d="M12 17h.01"
+                    />
+                  </svg>
+                </div>
+                <h3
+                  class="font-semibold tracking-tight text-xl"
+                >
+                  Real-Time Alerts
+                </h3>
+              </div>
+              <div
+                class="p-6 pt-0"
+              >
+                <p
+                  class="text-sm text-muted-foreground text-center"
+                >
+                  Get instant notifications when our AI detects unusual activities, threats, or custom scenarios you've configured. No more watching hours of footage.
+                </p>
+              </div>
+            </div>
+            <div
+              class="rounded-lg border bg-card text-card-foreground shadow-sm flex flex-col items-center text-center p-6"
+            >
+              <div
+                class="flex flex-col space-y-1.5 p-6"
+              >
+                <div
+                  class="flex h-16 w-16 items-center justify-center rounded-lg bg-primary/10 mx-auto mb-4"
+                >
+                  <svg
+                    class="lucide lucide-eye h-8 w-8 text-primary"
+                    fill="none"
+                    height="24"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    viewBox="0 0 24 24"
+                    width="24"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"
+                    />
+                    <circle
+                      cx="12"
+                      cy="12"
+                      r="3"
+                    />
+                  </svg>
+                </div>
+                <h3
+                  class="font-semibold tracking-tight text-xl"
+                >
+                  Custom Scenarios
+                </h3>
+              </div>
+              <div
+                class="p-6 pt-0"
+              >
+                <p
+                  class="text-sm text-muted-foreground text-center"
+                >
+                  Define specific behaviors, objects, or patterns you want to monitor. Our AI learns your environment and adapts to your unique security requirements.
+                </p>
+              </div>
+            </div>
+            <div
+              class="rounded-lg border bg-card text-card-foreground shadow-sm flex flex-col items-center text-center p-6"
+            >
+              <div
+                class="flex flex-col space-y-1.5 p-6"
+              >
+                <div
+                  class="flex h-16 w-16 items-center justify-center rounded-lg bg-primary/10 mx-auto mb-4"
+                >
+                  <svg
+                    class="lucide lucide-shield h-8 w-8 text-primary"
+                    fill="none"
+                    height="24"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    viewBox="0 0 24 24"
+                    width="24"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"
+                    />
+                  </svg>
+                </div>
+                <h3
+                  class="font-semibold tracking-tight text-xl"
+                >
+                  GDPR-Compliant
+                </h3>
+              </div>
+              <div
+                class="p-6 pt-0"
+              >
+                <p
+                  class="text-sm text-muted-foreground text-center"
+                >
+                  Built with privacy by design. Face anonymization, data encryption, and configurable retention policies ensure complete compliance with privacy regulations.
+                </p>
+              </div>
+            </div>
+          </dl>
+        </div>
+      </div>
+    </section>
+    <section
+      class="bg-muted/50 py-24 sm:py-32"
+    >
+      <div
+        class="mx-auto max-w-7xl px-6 lg:px-8"
+      >
+        <div
+          class="mx-auto max-w-2xl text-center"
+        >
+          <h2
+            class="text-3xl font-bold tracking-tight text-foreground sm:text-4xl"
+          >
+            Ready to upgrade your security?
+          </h2>
+          <p
+            class="mx-auto mt-6 max-w-xl text-lg leading-8 text-muted-foreground"
+          >
+            Join hundreds of organizations already using SecureWatch AI to protect what matters most.
+          </p>
+          <div
+            class="mt-10 flex items-center justify-center gap-x-6"
+          >
+            <a
+              class="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-11 rounded-md px-8"
+              href="/contact"
+            >
+              Start Free Trial
+            </a>
+            <a
+              class="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-11 rounded-md px-8"
+              href="/pricing"
+            >
+              View Pricing
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+`;

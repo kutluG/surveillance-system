@@ -1,0 +1,684 @@
+---
+# Namespace for edge inference deployment
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: surveillance-edge
+  labels:
+    name: surveillance-edge
+    environment: production
+    purpose: edge-inference
+
+---
+# ConfigMap for edge inference configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: edge-inference-config
+  namespace: surveillance-edge
+data:
+  # MLflow Configuration
+  MLFLOW_TRACKING_URI: "http://mlflow-server.surveillance-edge.svc.cluster.local:5000"
+  MLFLOW_EXPERIMENT_NAME: "edge-inference-production"
+  
+  # Model Configuration
+  MODEL_ARCHITECTURE: "mobilenet_v3"
+  MODEL_PRECISION: "fp16"
+  MODEL_BATCH_SIZE: "8"
+  MODEL_REGISTRY_STAGE: "Production"
+  
+  # Inference Configuration
+  INFERENCE_TIMEOUT: "30"
+  MAX_CONCURRENT_REQUESTS: "100"
+  ENABLE_TENSORRT: "true"
+  ENABLE_PERFORMANCE_MONITORING: "true"
+  
+  # Logging Configuration
+  LOG_LEVEL: "INFO"
+  LOG_FORMAT: "json"
+  METRICS_ENABLED: "true"
+  
+  # Edge Device Configuration
+  DEVICE_TYPE: "nvidia-gpu"
+  GPU_MEMORY_FRACTION: "0.8"
+  ENABLE_DYNAMIC_BATCHING: "true"
+
+---
+# Secret for MLflow and container registry credentials
+apiVersion: v1
+kind: Secret
+metadata:
+  name: edge-inference-secrets
+  namespace: surveillance-edge
+type: Opaque
+data:
+  # Base64 encoded credentials
+  mlflow-username: bWxmbG93  # mlflow
+  mlflow-password: cGFzc3dvcmQ=  # password
+  registry-username: YWRtaW4=  # admin
+  registry-password: cGFzc3dvcmQ=  # password
+
+---
+# PersistentVolumeClaim for model cache
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache-pvc
+  namespace: surveillance-edge
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: fast-ssd
+
+---
+# Service Account for edge inference pods
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: edge-inference-sa
+  namespace: surveillance-edge
+automountServiceAccountToken: true
+
+---
+# ClusterRole for model registry access
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: edge-inference-role
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch", "update"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+
+---
+# ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: edge-inference-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edge-inference-role
+subjects:
+- kind: ServiceAccount
+  name: edge-inference-sa
+  namespace: surveillance-edge
+
+---
+# Deployment for edge inference service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: surveillance-edge-inference
+  namespace: surveillance-edge
+  labels:
+    app: surveillance-edge
+    component: inference
+    version: v1.0.0
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: surveillance-edge
+      component: inference
+  template:
+    metadata:
+      labels:
+        app: surveillance-edge
+        component: inference
+        version: v1.0.0
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: edge-inference-sa
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+        node-type: "gpu-worker"
+      tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+      
+      initContainers:
+      # Download and cache models
+      - name: model-downloader
+        image: surveillance-edge:latest
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          echo "Downloading models from MLflow..."
+          python -c "
+          import mlflow
+          import os
+          from pathlib import Path
+          
+          # Setup MLflow client
+          mlflow.set_tracking_uri('${MLFLOW_TRACKING_URI}')
+          
+          # Download latest production model
+          model_name = 'surveillance_${MODEL_ARCHITECTURE}_edge'
+          client = mlflow.tracking.MlflowClient()
+          
+          try:
+              # Get production model
+              production_models = client.get_latest_versions(model_name, stages=['Production'])
+              if production_models:
+                  model_uri = f'models:/{model_name}/Production'
+                  print(f'Downloading model: {model_uri}')
+                  
+                  # Download to cache
+                  cache_dir = Path('/model-cache')
+                  cache_dir.mkdir(exist_ok=True)
+                  
+                  downloaded_path = mlflow.artifacts.download_artifacts(
+                      artifact_uri=model_uri,
+                      dst_path=str(cache_dir)
+                  )
+                  print(f'Model cached at: {downloaded_path}')
+              else:
+                  print('No production model found, will use staging model')
+                  staging_models = client.get_latest_versions(model_name, stages=['Staging'])
+                  if staging_models:
+                      model_uri = f'models:/{model_name}/Staging'
+                      downloaded_path = mlflow.artifacts.download_artifacts(
+                          artifact_uri=model_uri,
+                          dst_path=str(cache_dir)
+                      )
+                      print(f'Staging model cached at: {downloaded_path}')
+          except Exception as e:
+              print(f'Error downloading model: {e}')
+              exit(1)
+          "
+        env:
+        - name: MLFLOW_TRACKING_URI
+          valueFrom:
+            configMapKeyRef:
+              name: edge-inference-config
+              key: MLFLOW_TRACKING_URI
+        - name: MODEL_ARCHITECTURE
+          valueFrom:
+            configMapKeyRef:
+              name: edge-inference-config
+              key: MODEL_ARCHITECTURE
+        volumeMounts:
+        - name: model-cache
+          mountPath: /model-cache
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+      
+      containers:
+      # Main inference container
+      - name: inference-server
+        image: surveillance-edge:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
+        - containerPort: 8080
+          name: metrics
+          protocol: TCP
+        - containerPort: 50051
+          name: grpc
+          protocol: TCP
+        
+        env:
+        # MLflow Configuration
+        - name: MLFLOW_TRACKING_URI
+          valueFrom:
+            configMapKeyRef:
+              name: edge-inference-config
+              key: MLFLOW_TRACKING_URI
+        - name: MLFLOW_EXPERIMENT_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: edge-inference-config
+              key: MLFLOW_EXPERIMENT_NAME
+        
+        # Model Configuration
+        - name: MODEL_ARCHITECTURE
+          valueFrom:
+            configMapKeyRef:
+              name: edge-inference-config
+              key: MODEL_ARCHITECTURE
+        - name: MODEL_PRECISION
+          valueFrom:
+            configMapKeyRef:
+              name: edge-inference-config
+              key: MODEL_PRECISION
+        - name: MODEL_BATCH_SIZE
+          valueFrom:
+            configMapKeyRef:
+              name: edge-inference-config
+              key: MODEL_BATCH_SIZE
+        - name: MODEL_REGISTRY_STAGE
+          valueFrom:
+            configMapKeyRef:
+              name: edge-inference-config
+              key: MODEL_REGISTRY_STAGE
+        
+        # Inference Configuration
+        - name: INFERENCE_TIMEOUT
+          valueFrom:
+            configMapKeyRef:
+              name: edge-inference-config
+              key: INFERENCE_TIMEOUT
+        - name: MAX_CONCURRENT_REQUESTS
+          valueFrom:
+            configMapKeyRef:
+              name: edge-inference-config
+              key: MAX_CONCURRENT_REQUESTS
+        - name: ENABLE_TENSORRT
+          valueFrom:
+            configMapKeyRef:
+              name: edge-inference-config
+              key: ENABLE_TENSORRT
+        
+        # Device Configuration
+        - name: NVIDIA_VISIBLE_DEVICES
+          value: "all"
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: GPU_MEMORY_FRACTION
+          valueFrom:
+            configMapKeyRef:
+              name: edge-inference-config
+              key: GPU_MEMORY_FRACTION
+        
+        # Logging Configuration
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: edge-inference-config
+              key: LOG_LEVEL
+        - name: LOG_FORMAT
+          valueFrom:
+            configMapKeyRef:
+              name: edge-inference-config
+              key: LOG_FORMAT
+        
+        # Credentials
+        - name: MLFLOW_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: edge-inference-secrets
+              key: mlflow-username
+        - name: MLFLOW_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: edge-inference-secrets
+              key: mlflow-password
+        
+        # Health check endpoints
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        # Startup probe for slow model loading
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 10
+        
+        # Resource allocation
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "2000m"
+            nvidia.com/gpu: "1"
+          limits:
+            memory: "8Gi"
+            cpu: "4000m"
+            nvidia.com/gpu: "1"
+        
+        # Volume mounts
+        volumeMounts:
+        - name: model-cache
+          mountPath: /model-cache
+          readOnly: true
+        - name: tmp-storage
+          mountPath: /tmp
+        
+        # Security context
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      
+      # Sidecar: Model sync service
+      - name: model-sync
+        image: surveillance-edge:latest
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          echo "Starting model sync service..."
+          while true; do
+            echo "Checking for model updates..."
+            python -c "
+            import mlflow
+            import time
+            import os
+            from pathlib import Path
+            
+            mlflow.set_tracking_uri('${MLFLOW_TRACKING_URI}')
+            model_name = 'surveillance_${MODEL_ARCHITECTURE}_edge'
+            client = mlflow.tracking.MlflowClient()
+            
+            # Check for new production models every 5 minutes
+            try:
+                production_models = client.get_latest_versions(model_name, stages=['Production'])
+                if production_models:
+                    latest_version = production_models[0].version
+                    
+                    # Check if this is a newer version
+                    version_file = Path('/model-cache/current_version.txt')
+                    current_version = '0'
+                    if version_file.exists():
+                        current_version = version_file.read_text().strip()
+                    
+                    if latest_version != current_version:
+                        print(f'New model version detected: {latest_version} (current: {current_version})')
+                        
+                        # Download new model
+                        model_uri = f'models:/{model_name}/{latest_version}'
+                        cache_dir = Path('/model-cache')
+                        
+                        downloaded_path = mlflow.artifacts.download_artifacts(
+                            artifact_uri=model_uri,
+                            dst_path=str(cache_dir / f'version_{latest_version}')
+                        )
+                        
+                        # Update version file
+                        version_file.write_text(latest_version)
+                        
+                        print(f'Model updated to version {latest_version}')
+                        
+                        # Signal main container to reload (in production, this would trigger a rolling update)
+                        os.system('curl -X POST http://localhost:8000/reload-model')
+                    else:
+                        print(f'Model is up to date (version {current_version})')
+                        
+            except Exception as e:
+                print(f'Error checking for model updates: {e}')
+            
+            # Wait 5 minutes
+            time.sleep(300)
+            "
+            sleep 300
+          done
+        env:
+        - name: MLFLOW_TRACKING_URI
+          valueFrom:
+            configMapKeyRef:
+              name: edge-inference-config
+              key: MLFLOW_TRACKING_URI
+        - name: MODEL_ARCHITECTURE
+          valueFrom:
+            configMapKeyRef:
+              name: edge-inference-config
+              key: MODEL_ARCHITECTURE
+        volumeMounts:
+        - name: model-cache
+          mountPath: /model-cache
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "200m"
+      
+      # Volumes
+      volumes:
+      - name: model-cache
+        persistentVolumeClaim:
+          claimName: model-cache-pvc
+      - name: tmp-storage
+        emptyDir:
+          sizeLimit: 2Gi
+      
+      # Pod scheduling preferences
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - surveillance-edge
+              topologyKey: kubernetes.io/hostname
+
+---
+# Service for edge inference
+apiVersion: v1
+kind: Service
+metadata:
+  name: surveillance-edge-service
+  namespace: surveillance-edge
+  labels:
+    app: surveillance-edge
+    component: inference
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8000
+    protocol: TCP
+  - name: metrics
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  - name: grpc
+    port: 50051
+    targetPort: 50051
+    protocol: TCP
+  selector:
+    app: surveillance-edge
+    component: inference
+
+---
+# Ingress for external access
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: surveillance-edge-ingress
+  namespace: surveillance-edge
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+spec:
+  tls:
+  - hosts:
+    - edge-inference.surveillance.company.com
+    secretName: edge-inference-tls
+  rules:
+  - host: edge-inference.surveillance.company.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: surveillance-edge-service
+            port:
+              number: 80
+
+---
+# HorizontalPodAutoscaler for automatic scaling
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: surveillance-edge-hpa
+  namespace: surveillance-edge
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: surveillance-edge-inference
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Pods
+    pods:
+      metric:
+        name: inference_requests_per_second
+      target:
+        type: AverageValue
+        averageValue: "50"
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60
+      - type: Pods
+        value: 5
+        periodSeconds: 60
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      selectPolicy: Min
+
+---
+# PodDisruptionBudget for high availability
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: surveillance-edge-pdb
+  namespace: surveillance-edge
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: surveillance-edge
+      component: inference
+
+---
+# NetworkPolicy for security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: surveillance-edge-netpol
+  namespace: surveillance-edge
+spec:
+  podSelector:
+    matchLabels:
+      app: surveillance-edge
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    - podSelector:
+        matchLabels:
+          app: surveillance-edge
+    ports:
+    - protocol: TCP
+      port: 8000
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 50051
+  egress:
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: surveillance-edge
+    ports:
+    - protocol: TCP
+      port: 5000  # MLflow server
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443  # HTTPS for external APIs

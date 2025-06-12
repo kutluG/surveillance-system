@@ -1,7 +1,103 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { alertService } from '../../services/alertService';
+import secureStorage from '../../utils/secureStorage';
+
+const PENDING_ACKS_KEY = 'pendingAcks';
+
+// Helper function to store pending acknowledgments for offline sync
+const storePendingAck = async (alertId) => {
+  try {
+    const existing = await secureStorage.getItem(PENDING_ACKS_KEY);
+    const pendingAcks = existing ? JSON.parse(existing) : [];
+    
+    // Avoid duplicates
+    if (!pendingAcks.find(ack => ack.alertId === alertId)) {
+      pendingAcks.push({
+        alertId,
+        timestamp: new Date().toISOString(),
+        retryCount: 0
+      });
+      await secureStorage.setItem(PENDING_ACKS_KEY, JSON.stringify(pendingAcks));
+    }
+  } catch (error) {
+    console.error('Error storing pending acknowledgment:', error);
+  }
+};
+
+// Helper function to remove acknowledged alert from pending queue
+const removePendingAckFromStorage = async (alertId) => {
+  try {
+    const existing = await secureStorage.getItem(PENDING_ACKS_KEY);
+    if (existing) {
+      const pendingAcks = JSON.parse(existing);
+      const filteredAcks = pendingAcks.filter(ack => ack.alertId !== alertId);
+      await secureStorage.setItem(PENDING_ACKS_KEY, JSON.stringify(filteredAcks));
+    }
+  } catch (error) {
+    console.error('Error removing pending acknowledgment:', error);
+  }
+};
 
 // Async thunks
+export const flushPendingAcks = createAsyncThunk(
+  'alerts/flushPendingAcks',
+  async (_, { rejectWithValue }) => {
+    try {
+      const existing = await secureStorage.getItem(PENDING_ACKS_KEY);
+      if (!existing) return { processed: 0 };
+      
+      const pendingAcks = JSON.parse(existing);
+      if (pendingAcks.length === 0) return { processed: 0 };
+      
+      const results = [];
+      const maxRetries = 3;
+      
+      for (const pendingAck of pendingAcks) {
+        if (pendingAck.retryCount >= maxRetries) {
+          console.warn(`Max retries reached for alert ${pendingAck.alertId}`);
+          continue;
+        }
+        
+        try {
+          const response = await alertService.acknowledgeAlert(pendingAck.alertId);
+          results.push({
+            alertId: pendingAck.alertId,
+            success: true,
+            data: response.data
+          });
+        } catch (error) {
+          console.error(`Failed to sync acknowledgment for alert ${pendingAck.alertId}:`, error);
+          // Increment retry count
+          pendingAck.retryCount = (pendingAck.retryCount || 0) + 1;
+          results.push({
+            alertId: pendingAck.alertId,
+            success: false,
+            error: error.message,
+            retryCount: pendingAck.retryCount
+          });
+        }
+      }
+      
+      // Filter out successfully processed acknowledgments
+      const remainingAcks = pendingAcks.filter(ack => {
+        const result = results.find(r => r.alertId === ack.alertId);
+        return !result?.success;
+      });
+      
+      // Update pending queue
+      await secureStorage.setItem(PENDING_ACKS_KEY, JSON.stringify(remainingAcks));
+      
+      return {
+        processed: results.filter(r => r.success).length,
+        failed: results.filter(r => !r.success).length,
+        results
+      };
+    } catch (error) {
+      return rejectWithValue(error.message);
+    }
+  }
+);
+
 export const fetchAlerts = createAsyncThunk(
   'alerts/fetchAlerts',
   async (params = {}, { rejectWithValue }) => {
@@ -16,11 +112,45 @@ export const fetchAlerts = createAsyncThunk(
 
 export const acknowledgeAlert = createAsyncThunk(
   'alerts/acknowledgeAlert',
-  async (alertId, { rejectWithValue }) => {
+  async (alertId, { rejectWithValue, getState, dispatch }) => {
     try {
+      // Check network connectivity
+      const networkState = getState().network;
+      const isConnected = networkState?.isConnected ?? true;
+      
+      if (!isConnected) {
+        // Store for offline sync
+        await storePendingAck(alertId);
+        
+        // Return optimistic update data
+        return { 
+          alertId, 
+          acknowledgedAt: new Date().toISOString(),
+          offline: true 
+        };
+      }
+        // Online: make API call
       const response = await alertService.acknowledgeAlert(alertId);
+      
+      // Remove from pending queue if it was there
+      await removePendingAckFromStorage(alertId);
+      
       return { alertId, ...response.data };
     } catch (error) {
+      // If API fails but we're online, still store for retry
+      const networkState = getState().network;
+      const isConnected = networkState?.isConnected ?? true;
+      
+      if (isConnected) {
+        await storePendingAck(alertId);
+        // Return optimistic update even on API failure for better UX
+        return { 
+          alertId, 
+          acknowledgedAt: new Date().toISOString(),
+          offline: true 
+        };
+      }
+      
       return rejectWithValue(error.response?.data || error.message);
     }
   }
@@ -57,6 +187,8 @@ const initialState = {
   loading: false,
   error: null,
   lastUpdated: null,
+  pendingAcks: [], // Track alerts with pending offline acknowledgments
+  syncStatus: 'idle', // idle, syncing, error
   filters: {
     status: 'all', // all, active, acknowledged, dismissed
     severity: 'all', // all, critical, high, medium, low
@@ -120,10 +252,22 @@ const alertsSlice = createSlice({
       state.sortBy = action.payload;
     },
     setSortOrder: (state, action) => {
-      state.sortOrder = action.payload;
-    },
+      state.sortOrder = action.payload;    },
     clearError: (state) => {
       state.error = null;
+    },
+    addPendingAck: (state, action) => {
+      const alertId = action.payload;
+      if (!state.pendingAcks.includes(alertId)) {
+        state.pendingAcks.push(alertId);
+      }
+    },
+    removePendingAck: (state, action) => {
+      const alertId = action.payload;
+      state.pendingAcks = state.pendingAcks.filter(id => id !== alertId);
+    },
+    clearPendingAcks: (state) => {
+      state.pendingAcks = [];
     },
     resetAlertsState: () => initialState
   },
@@ -144,8 +288,7 @@ const alertsSlice = createSlice({
       .addCase(fetchAlerts.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
-      })
-      // Acknowledge alert
+      })      // Acknowledge alert
       .addCase(acknowledgeAlert.fulfilled, (state, action) => {
         const index = state.alerts.findIndex(alert => alert.id === action.payload.alertId);
         if (index !== -1) {
@@ -153,10 +296,45 @@ const alertsSlice = createSlice({
           state.alerts[index].status = 'acknowledged';
           state.alerts[index].acknowledgedAt = action.payload.acknowledgedAt;
           
+          // Add visual indicator for offline acknowledgments
+          if (action.payload.offline) {
+            state.alerts[index].pendingSync = true;
+            if (!state.pendingAcks.includes(action.payload.alertId)) {
+              state.pendingAcks.push(action.payload.alertId);
+            }
+          } else {
+            state.alerts[index].pendingSync = false;
+            state.pendingAcks = state.pendingAcks.filter(id => id !== action.payload.alertId);
+          }
+          
           if (oldStatus === 'active') {
             state.unreadCount = Math.max(0, state.unreadCount - 1);
           }
         }
+      })
+      // Flush pending acknowledgments
+      .addCase(flushPendingAcks.pending, (state) => {
+        state.syncStatus = 'syncing';
+      })
+      .addCase(flushPendingAcks.fulfilled, (state, action) => {
+        state.syncStatus = 'idle';
+        
+        // Update alerts that were successfully synced
+        if (action.payload.results) {
+          action.payload.results.forEach(result => {
+            if (result.success) {
+              const index = state.alerts.findIndex(alert => alert.id === result.alertId);
+              if (index !== -1) {
+                state.alerts[index].pendingSync = false;
+              }
+              state.pendingAcks = state.pendingAcks.filter(id => id !== result.alertId);
+            }
+          });
+        }
+      })
+      .addCase(flushPendingAcks.rejected, (state, action) => {
+        state.syncStatus = 'error';
+        state.error = action.payload;
       })
       // Dismiss alert
       .addCase(dismissAlert.fulfilled, (state, action) => {
@@ -197,6 +375,9 @@ export const {
   setSortBy,
   setSortOrder,
   clearError,
+  addPendingAck,
+  removePendingAck,
+  clearPendingAcks,
   resetAlertsState
 } = alertsSlice.actions;
 

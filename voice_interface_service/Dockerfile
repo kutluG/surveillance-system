@@ -6,6 +6,9 @@ RUN apt-get update && apt-get install -y \
     curl \
     portaudio19-dev \
     alsa-utils \
+    build-essential \
+    gcc \
+    libasound2-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -20,8 +23,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY voice_interface_service/ .
 
-# Copy shared modules if they exist
-COPY shared/ ./shared/ 2>/dev/null || true
+# Copy shared modules
+COPY shared/ ./shared/
 
 # Expose port
 EXPOSE 8000

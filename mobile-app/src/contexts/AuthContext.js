@@ -1,5 +1,5 @@
 import React, {createContext, useContext, useState, useEffect} from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from '../utils/secureStorage';
 import {authService} from '../services/authService';
 import biometricService from '../services/biometricService';
 
@@ -21,10 +21,9 @@ export const AuthProvider = ({children}) => {
   useEffect(() => {
     checkAuthState();
   }, []);
-
   const checkAuthState = async () => {
     try {
-      const token = await AsyncStorage.getItem('auth_token');
+      const token = await secureStorage.getItem('auth_token');
       if (token) {
         const userData = await authService.verifyToken(token);
         if (userData) {
@@ -34,17 +33,16 @@ export const AuthProvider = ({children}) => {
       }
     } catch (error) {
       console.error('Auth check failed:', error);
-      await AsyncStorage.removeItem('auth_token');
+      await secureStorage.removeItem('auth_token');
     } finally {
       setLoading(false);
     }
-  };
-  const login = async (credentials) => {
+  };  const login = async (credentials) => {
     try {
       setLoading(true);
       const response = await authService.login(credentials);
       
-      await AsyncStorage.setItem('auth_token', response.token);
+      await secureStorage.setItem('auth_token', response.token);
       setUser(response.user);
       setIsAuthenticated(true);
       
@@ -71,9 +69,8 @@ export const AuthProvider = ({children}) => {
       if (!biometricResult.success) {
         throw new Error(biometricResult.error || 'Biometric authentication failed');
       }
-      
-      // Get stored token for biometric login
-      const token = await AsyncStorage.getItem('auth_token');
+        // Get stored token for biometric login
+      const token = await secureStorage.getItem('auth_token');
       if (!token) {
         throw new Error('No stored authentication found. Please login with credentials.');
       }
@@ -94,10 +91,9 @@ export const AuthProvider = ({children}) => {
       setLoading(false);
     }
   };
-
   const logout = async () => {
     try {
-      await AsyncStorage.removeItem('auth_token');
+      await secureStorage.removeItem('auth_token');
       setUser(null);
       setIsAuthenticated(false);
     } catch (error) {

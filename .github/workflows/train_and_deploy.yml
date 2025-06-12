@@ -1,0 +1,638 @@
+name: Model Training and Deployment Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'train/**'
+      - 'models/**'
+      - 'data/**'
+      - '.github/workflows/train_and_deploy.yml'
+  
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'train/**'
+      - 'models/**'
+  
+  schedule:
+    # Automatic retraining every Sunday at 2 AM UTC
+    - cron: '0 2 * * 0'
+  
+  workflow_dispatch:
+    inputs:
+      model_architecture:
+        description: 'Model architecture to train'
+        required: true
+        default: 'mobilenet_v3'
+        type: choice
+        options:
+          - mobilenet_v3
+          - efficientnet_b0
+          - yolov8n
+      
+      epochs:
+        description: 'Number of training epochs'
+        required: true
+        default: '50'
+        type: string
+      
+      precision:
+        description: 'TensorRT precision for optimization'
+        required: true
+        default: 'fp16'
+        type: choice
+        options:
+          - fp32
+          - fp16
+          - int8
+      
+      deploy_to_staging:
+        description: 'Deploy to staging environment'
+        required: true
+        default: true
+        type: boolean
+      
+      deploy_to_production:
+        description: 'Deploy to production environment'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI || 'http://localhost:5000' }}
+  MLFLOW_EXPERIMENT_NAME: ${{ secrets.MLFLOW_EXPERIMENT_NAME || 'surveillance-edge-models' }}
+  DATASET_PATH: ${{ secrets.DATASET_PATH || 'data/surveillance_dataset' }}
+  REGISTRY_URL: ${{ secrets.REGISTRY_URL || 'localhost:5000' }}
+  PYTHONPATH: ${{ github.workspace }}
+
+jobs:
+  setup:
+    name: Setup Environment
+    runs-on: ubuntu-latest
+    outputs:
+      model_architecture: ${{ steps.config.outputs.model_architecture }}
+      epochs: ${{ steps.config.outputs.epochs }}
+      precision: ${{ steps.config.outputs.precision }}
+      deploy_staging: ${{ steps.config.outputs.deploy_staging }}
+      deploy_production: ${{ steps.config.outputs.deploy_production }}
+      run_training: ${{ steps.changes.outputs.run_training }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      
+      - name: Detect configuration
+        id: config
+        run: |
+          # Set defaults based on trigger
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "model_architecture=${{ github.event.inputs.model_architecture }}" >> $GITHUB_OUTPUT
+            echo "epochs=${{ github.event.inputs.epochs }}" >> $GITHUB_OUTPUT
+            echo "precision=${{ github.event.inputs.precision }}" >> $GITHUB_OUTPUT
+            echo "deploy_staging=${{ github.event.inputs.deploy_to_staging }}" >> $GITHUB_OUTPUT
+            echo "deploy_production=${{ github.event.inputs.deploy_to_production }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "model_architecture=mobilenet_v3" >> $GITHUB_OUTPUT
+            echo "epochs=100" >> $GITHUB_OUTPUT
+            echo "precision=fp16" >> $GITHUB_OUTPUT
+            echo "deploy_staging=true" >> $GITHUB_OUTPUT
+            echo "deploy_production=false" >> $GITHUB_OUTPUT
+          else
+            echo "model_architecture=mobilenet_v3" >> $GITHUB_OUTPUT
+            echo "epochs=50" >> $GITHUB_OUTPUT
+            echo "precision=fp16" >> $GITHUB_OUTPUT
+            echo "deploy_staging=true" >> $GITHUB_OUTPUT
+            echo "deploy_production=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Check for relevant changes
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "run_training=true" >> $GITHUB_OUTPUT
+          else
+            # Check if training-related files changed
+            git diff --name-only HEAD~1 HEAD | grep -E "(train/|models/|data/)" && echo "run_training=true" >> $GITHUB_OUTPUT || echo "run_training=false" >> $GITHUB_OUTPUT
+          fi
+
+  train_model:
+    name: Train ML Model
+    runs-on: self-hosted
+    needs: setup
+    if: needs.setup.outputs.run_training == 'true'
+    
+    strategy:
+      matrix:
+        model: 
+          - ${{ needs.setup.outputs.model_architecture }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+          pip install ultralytics
+      
+      - name: Setup MLflow tracking
+        run: |
+          # Start MLflow server in background if not running
+          if ! curl -f $MLFLOW_TRACKING_URI/health 2>/dev/null; then
+            echo "Starting MLflow server..."
+            python infra/mlflow_server.py &
+            sleep 30
+          fi
+          
+          # Verify MLflow connection
+          python -c "import mlflow; mlflow.set_tracking_uri('$MLFLOW_TRACKING_URI'); print('MLflow connected:', mlflow.get_tracking_uri())"
+      
+      - name: Setup dataset
+        run: |
+          # Download or prepare dataset
+          if [ ! -d "$DATASET_PATH" ]; then
+            echo "Preparing surveillance dataset..."
+            mkdir -p $DATASET_PATH
+            
+            # This would typically download from cloud storage
+            # For demo purposes, create sample structure
+            mkdir -p $DATASET_PATH/train/{person,vehicle,bike,animal}
+            mkdir -p $DATASET_PATH/val/{person,vehicle,bike,animal}
+            
+            # Create data.yaml for YOLO format
+            cat > $DATASET_PATH/data.yaml << EOF
+          train: train
+          val: val
+          nc: 10
+          names: ['person', 'vehicle', 'bike', 'animal', 'package', 'weapon', 'fire', 'smoke', 'crowd', 'vandalism']
+          EOF
+          fi
+      
+      - name: Train model with MLflow tracking
+        id: training
+        run: |
+          echo "🚀 Starting model training..."
+          
+          python train/train.py \
+            --model ${{ matrix.model }} \
+            --epochs ${{ needs.setup.outputs.epochs }} \
+            --batch-size 32 \
+            --lr 0.001 \
+            --img-size 224 \
+            --seed 42
+          
+          # Get the run ID from MLflow (this would need to be returned by the script)
+          RUN_ID=$(python -c "
+          import mlflow
+          mlflow.set_tracking_uri('$MLFLOW_TRACKING_URI')
+          experiment = mlflow.get_experiment_by_name('$MLFLOW_EXPERIMENT_NAME')
+          runs = mlflow.search_runs(experiment.experiment_id, order_by=['start_time DESC'], max_results=1)
+          print(runs.iloc[0]['run_id'] if len(runs) > 0 else '')
+          ")
+          
+          echo "training_run_id=$RUN_ID" >> $GITHUB_OUTPUT
+          echo "✅ Training completed. Run ID: $RUN_ID"
+      
+      - name: Validate model performance
+        run: |
+          echo "🔍 Validating model performance..."
+          
+          python -c "
+          import mlflow
+          import sys
+          
+          mlflow.set_tracking_uri('$MLFLOW_TRACKING_URI')
+          run = mlflow.get_run('${{ steps.training.outputs.training_run_id }}')
+          
+          # Check if model meets minimum performance criteria
+          val_accuracy = run.data.metrics.get('val_accuracy', 0)
+          val_f1 = run.data.metrics.get('val_f1_score', 0)
+          
+          print(f'Validation accuracy: {val_accuracy:.2f}%')
+          print(f'Validation F1-score: {val_f1:.3f}')
+          
+          # Minimum thresholds for deployment
+          min_accuracy = 75.0
+          min_f1 = 0.7
+          
+          if val_accuracy < min_accuracy:
+              print(f'❌ Model accuracy {val_accuracy:.2f}% below threshold {min_accuracy}%')
+              sys.exit(1)
+          
+          if val_f1 < min_f1:
+              print(f'❌ Model F1-score {val_f1:.3f} below threshold {min_f1}')
+              sys.exit(1)
+          
+          print('✅ Model performance validation passed')
+          "
+      
+      - name: Upload training artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: training-artifacts-${{ matrix.model }}
+          path: |
+            runs/
+            *.pt
+            *.onnx
+          retention-days: 30
+
+  optimize_tensorrt:
+    name: Optimize with TensorRT
+    runs-on: self-hosted
+    needs: [setup, train_model]
+    if: success() && needs.setup.outputs.run_training == 'true'
+    
+    strategy:
+      matrix:
+        model: 
+          - ${{ needs.setup.outputs.model_architecture }}
+        precision:
+          - ${{ needs.setup.outputs.precision }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python with CUDA
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install TensorRT dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          
+          # Install TensorRT (assuming it's available in the environment)
+          pip install tensorrt onnx onnxruntime-gpu pycuda
+      
+      - name: Download and optimize model
+        id: optimization
+        run: |
+          echo "🔧 Starting TensorRT optimization..."
+          
+          # Get the latest trained model
+          LATEST_RUN_ID=$(python -c "
+          import mlflow
+          mlflow.set_tracking_uri('$MLFLOW_TRACKING_URI')
+          experiment = mlflow.get_experiment_by_name('$MLFLOW_EXPERIMENT_NAME')
+          runs = mlflow.search_runs(experiment.experiment_id, order_by=['start_time DESC'], max_results=1)
+          print(runs.iloc[0]['run_id'] if len(runs) > 0 else '')
+          ")
+          
+          python train/convert_to_trt.py \
+            --run-id $LATEST_RUN_ID \
+            --precision ${{ matrix.precision }} \
+            --max-batch-size 8 \
+            --max-workspace-size 2.0
+          
+          echo "optimization_completed=true" >> $GITHUB_OUTPUT
+      
+      - name: Upload optimized artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: tensorrt-artifacts-${{ matrix.model }}-${{ matrix.precision }}
+          path: |
+            cache/tensorrt/
+            *.engine
+          retention-days: 30
+
+  test_integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [setup, train_model]
+    if: success() && needs.setup.outputs.run_training == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+      
+      - name: Install test dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-mock
+      
+      - name: Run MLflow integration tests
+        run: |
+          echo "🧪 Running MLflow integration tests..."
+          python -m pytest tests/test_mlflow_integration.py -v --cov=train --cov-report=xml
+      
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: integration
+          name: mlflow-integration
+
+  build_container:
+    name: Build and Push Container
+    runs-on: ubuntu-latest
+    needs: [setup, train_model, optimize_tensorrt]
+    if: success() && needs.setup.outputs.run_training == 'true'
+    
+    strategy:
+      matrix:
+        model: 
+          - ${{ needs.setup.outputs.model_architecture }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: training-artifacts-${{ matrix.model }}
+          path: ./artifacts/
+      
+      - name: Download TensorRT artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: tensorrt-artifacts-${{ matrix.model }}-${{ needs.setup.outputs.precision }}
+          path: ./artifacts/tensorrt/
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_URL }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+      
+      - name: Extract model metadata
+        id: metadata
+        run: |
+          # Get model metadata from MLflow
+          MODEL_VERSION=$(date +%Y%m%d-%H%M%S)
+          LATEST_RUN_ID=$(python -c "
+          import mlflow
+          mlflow.set_tracking_uri('$MLFLOW_TRACKING_URI')
+          experiment = mlflow.get_experiment_by_name('$MLFLOW_EXPERIMENT_NAME')
+          runs = mlflow.search_runs(experiment.experiment_id, order_by=['start_time DESC'], max_results=1)
+          print(runs.iloc[0]['run_id'] if len(runs) > 0 else '')
+          ")
+          
+          echo "model_version=$MODEL_VERSION" >> $GITHUB_OUTPUT
+          echo "run_id=$LATEST_RUN_ID" >> $GITHUB_OUTPUT
+      
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/edge-inference.Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY_URL }}/surveillance-edge:${{ matrix.model }}-${{ steps.metadata.outputs.model_version }}
+            ${{ env.REGISTRY_URL }}/surveillance-edge:${{ matrix.model }}-latest
+          build-args: |
+            MODEL_ARCHITECTURE=${{ matrix.model }}
+            MODEL_VERSION=${{ steps.metadata.outputs.model_version }}
+            TENSORRT_PRECISION=${{ needs.setup.outputs.precision }}
+            MLFLOW_RUN_ID=${{ steps.metadata.outputs.run_id }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy_staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [setup, train_model, optimize_tensorrt, test_integration, build_container]
+    if: success() && needs.setup.outputs.deploy_staging == 'true'
+    environment: staging
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+      
+      - name: Configure kubeconfig
+        run: |
+          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > ~/.kube/config
+      
+      - name: Update model registry stage
+        run: |
+          python -c "
+          import mlflow
+          from mlflow.tracking import MlflowClient
+          
+          mlflow.set_tracking_uri('$MLFLOW_TRACKING_URI')
+          client = MlflowClient()
+          
+          # Get latest model version
+          model_name = 'surveillance_${{ needs.setup.outputs.model_architecture }}_edge'
+          latest_versions = client.get_latest_versions(model_name, stages=['None'])
+          
+          if latest_versions:
+              version = latest_versions[0].version
+              client.transition_model_version_stage(
+                  name=model_name,
+                  version=version,
+                  stage='Staging'
+              )
+              print(f'✅ Model {model_name} v{version} transitioned to Staging')
+          "
+      
+      - name: Deploy to Kubernetes staging
+        run: |
+          # Update deployment with new image
+          kubectl set image deployment/surveillance-edge-staging \
+            surveillance-edge=${{ env.REGISTRY_URL }}/surveillance-edge:${{ needs.setup.outputs.model_architecture }}-latest \
+            -n staging
+          
+          # Wait for rollout
+          kubectl rollout status deployment/surveillance-edge-staging -n staging --timeout=300s
+          
+          echo "✅ Deployed to staging environment"
+      
+      - name: Run smoke tests
+        run: |
+          # Wait for pods to be ready
+          kubectl wait --for=condition=ready pod -l app=surveillance-edge -n staging --timeout=120s
+          
+          # Run basic health checks
+          STAGING_URL=$(kubectl get service surveillance-edge-service -n staging -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          
+          if [ -n "$STAGING_URL" ]; then
+            echo "Running smoke tests against $STAGING_URL"
+            curl -f http://$STAGING_URL/health || exit 1
+            curl -f http://$STAGING_URL/metrics || exit 1
+            echo "✅ Smoke tests passed"
+          fi
+
+  deploy_production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [setup, train_model, optimize_tensorrt, test_integration, build_container, deploy_staging]
+    if: success() && needs.setup.outputs.deploy_production == 'true'
+    environment: production
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+      
+      - name: Configure kubeconfig
+        run: |
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > ~/.kube/config
+      
+      - name: Manual approval checkpoint
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ github.TOKEN }}
+          approvers: ${{ secrets.PRODUCTION_APPROVERS }}
+          minimum-approvals: 2
+          issue-title: "Production Deployment Approval Required"
+          issue-body: |
+            Model: ${{ needs.setup.outputs.model_architecture }}
+            Version: Latest trained model
+            Precision: ${{ needs.setup.outputs.precision }}
+            
+            Please review the staging deployment and approve for production.
+      
+      - name: Update model registry stage
+        run: |
+          python -c "
+          import mlflow
+          from mlflow.tracking import MlflowClient
+          
+          mlflow.set_tracking_uri('$MLFLOW_TRACKING_URI')
+          client = MlflowClient()
+          
+          # Get staging model version
+          model_name = 'surveillance_${{ needs.setup.outputs.model_architecture }}_edge'
+          staging_versions = client.get_latest_versions(model_name, stages=['Staging'])
+          
+          if staging_versions:
+              version = staging_versions[0].version
+              client.transition_model_version_stage(
+                  name=model_name,
+                  version=version,
+                  stage='Production',
+                  archive_existing_versions=True
+              )
+              print(f'✅ Model {model_name} v{version} transitioned to Production')
+          "
+      
+      - name: Deploy to Kubernetes production
+        run: |
+          # Blue-green deployment strategy
+          kubectl set image deployment/surveillance-edge-production \
+            surveillance-edge=${{ env.REGISTRY_URL }}/surveillance-edge:${{ needs.setup.outputs.model_architecture }}-latest \
+            -n production
+          
+          # Wait for rollout
+          kubectl rollout status deployment/surveillance-edge-production -n production --timeout=600s
+          
+          echo "✅ Deployed to production environment"
+      
+      - name: Run production validation tests
+        run: |
+          # Comprehensive production validation
+          kubectl wait --for=condition=ready pod -l app=surveillance-edge -n production --timeout=300s
+          
+          PRODUCTION_URL=$(kubectl get service surveillance-edge-service -n production -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          
+          if [ -n "$PRODUCTION_URL" ]; then
+            echo "Running production validation tests..."
+            
+            # Health check
+            curl -f http://$PRODUCTION_URL/health || exit 1
+            
+            # Metrics endpoint
+            curl -f http://$PRODUCTION_URL/metrics || exit 1
+            
+            # Model inference test
+            echo '{"image": "base64_encoded_test_image"}' | \
+              curl -f -X POST -H "Content-Type: application/json" \
+              -d @- http://$PRODUCTION_URL/predict || exit 1
+            
+            echo "✅ Production validation tests passed"
+          fi
+
+  notify:
+    name: Notification
+    runs-on: ubuntu-latest
+    needs: [setup, train_model, optimize_tensorrt, test_integration, build_container, deploy_staging, deploy_production]
+    if: always()
+    
+    steps:
+      - name: Notify deployment status
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#ml-deployments'
+          text: |
+            🤖 Model Training & Deployment Pipeline
+            
+            Model: ${{ needs.setup.outputs.model_architecture }}
+            Precision: ${{ needs.setup.outputs.precision }}
+            Training: ${{ needs.train_model.result }}
+            TensorRT Optimization: ${{ needs.optimize_tensorrt.result }}
+            Integration Tests: ${{ needs.test_integration.result }}
+            Container Build: ${{ needs.build_container.result }}
+            Staging Deployment: ${{ needs.deploy_staging.result }}
+            Production Deployment: ${{ needs.deploy_production.result }}
+            
+            Commit: ${{ github.sha }}
+            Author: ${{ github.actor }}
+            Workflow: ${{ github.workflow }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        if: env.SLACK_WEBHOOK_URL != ''
+      
+      - name: Create GitHub release
+        uses: actions/create-release@v1
+        if: success() && needs.deploy_production.result == 'success'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: model-v${{ github.run_number }}
+          release_name: Edge Model Release v${{ github.run_number }}
+          body: |
+            🚀 **Automated Model Release**
+            
+            **Model Details:**
+            - Architecture: ${{ needs.setup.outputs.model_architecture }}
+            - Precision: ${{ needs.setup.outputs.precision }}
+            - Training Epochs: ${{ needs.setup.outputs.epochs }}
+            
+            **Performance Improvements:**
+            - TensorRT optimization applied
+            - Deployed to production environment
+            - All integration tests passed
+            
+            **Deployment Status:**
+            - ✅ Staging: Deployed and validated
+            - ✅ Production: Deployed and validated
+            
+            **Container Image:**
+            `${{ env.REGISTRY_URL }}/surveillance-edge:${{ needs.setup.outputs.model_architecture }}-latest`
+          draft: false
+          prerelease: false

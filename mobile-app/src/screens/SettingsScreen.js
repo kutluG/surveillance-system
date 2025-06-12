@@ -11,7 +11,7 @@ import {
   TextInput,
   Linking,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from '../utils/secureStorage';
 import { AuthContext } from '../contexts/AuthContext';
 import { COLORS, SIZES, FONTS } from '../constants';
 import Card from '../components/Card';
@@ -71,10 +71,9 @@ const SettingsScreen = ({ navigation }) => {
     newPassword: '',
     confirmPassword: '',
   });
-
   const handleSaveSettings = async () => {
     try {
-      await AsyncStorage.setItem('@app_settings', JSON.stringify(settings));
+      await secureStorage.setItem('@app_settings', JSON.stringify(settings));
       Alert.alert('Success', 'Settings saved successfully');
     } catch (error) {
       Alert.alert('Error', 'Failed to save settings');

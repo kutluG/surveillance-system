@@ -1,7 +1,17 @@
-version: '3.8'
-
 # Surveillance System Docker Compose Configuration
 # This file orchestrates all microservices and infrastructure components
+
+# =============================================================================
+# SHARED ENVIRONMENT VARIABLES
+# =============================================================================
+x-common-variables: &common-aws-env
+  # AWS Configuration for WORM Audit Logging
+  AWS_S3_BUCKET: ${AWS_S3_BUCKET:-surveillance-audit-logs}
+  AWS_REGION: ${AWS_REGION:-us-east-1}
+  AWS_S3_PREFIX: ${AWS_S3_PREFIX:-audit-logs}
+  # AWS credentials should be provided via AWS IAM roles or environment
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
 
 services:
   # =============================================================================
@@ -12,14 +22,14 @@ services:
     image: postgres:15
     environment:
       POSTGRES_DB: events_db
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
+      POSTGRES_USER: surveillance_user
+      POSTGRES_PASSWORD: surveillance_pass_5487
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d events_db"]
+      test: ["CMD-SHELL", "pg_isready -U surveillance_user -d events_db"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -104,19 +114,32 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: admin
     volumes:
-      - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+      - grafana_data:/var/lib/grafana      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+
   # =============================================================================
   # API GATEWAY
   # =============================================================================
-
+  
   api_gateway:
     build:
       context: .
       dockerfile: api_gateway/Dockerfile
     env_file:
-      - .env
+      - .env    environment:
+      - SERVICE_NAME=api_gateway
+      - LOG_LEVEL=INFO
+      # Rate Limiting Configuration
+      - RATE_LIMIT_DEFAULT=100/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_ENABLED=true
+      # AWS Configuration for WORM Audit Logging
+      - AWS_S3_BUCKET=${AWS_S3_BUCKET:-surveillance-audit-logs}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_S3_PREFIX=${AWS_S3_PREFIX:-audit-logs}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
     ports:
       - "8000:8000"
     depends_on:
@@ -132,24 +155,44 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-
   # =============================================================================
   # APPLICATION SERVICES
   # =============================================================================
-
+  
   edge_service:
     build:
       context: .
       dockerfile: edge_service/Dockerfile
     env_file:
-      - .env
+      - .env    environment:
+      # Logging Configuration
+      - SERVICE_NAME=edge_service
+      - LOG_LEVEL=INFO
+      # Rate Limiting Configuration
+      - RATE_LIMIT_DEFAULT=100/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_ENABLED=true
+      # AWS Configuration for WORM Audit Logging
+      - AWS_S3_BUCKET=${AWS_S3_BUCKET:-surveillance-audit-logs}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_S3_PREFIX=${AWS_S3_PREFIX:-audit-logs}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      # Face Anonymization Configuration
+      - ANONYMIZATION_ENABLED=true
+      - PRIVACY_LEVEL=moderate
+      - ANONYMIZATION_METHOD=blur
+      - FACE_MODEL_PATH=/app/models
+      - HAAR_CASCADE_PATH=/app/models/haarcascade_frontalface_default.xml
+      - DNN_PROTOTXT_PATH=/app/models/opencv_face_detector.pbtxt
+      - DNN_MODEL_PATH=/app/models/opencv_face_detector_uint8.pb
     ports:
       - "8001:8000"
     volumes:
       - ./models:/models:ro
       - ./certs:/certs:ro
-      - /dev/video0:/dev/video0  # Camera access (Linux)
-    depends_on:
+      - /dev/video0:/dev/video0  # Camera access (Linux)    depends_on:
       - kafka
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -163,6 +206,14 @@ services:
       dockerfile: mqtt_kafka_bridge/Dockerfile
     env_file:
       - .env
+    environment:
+      - SERVICE_NAME=mqtt_kafka_bridge
+      - LOG_LEVEL=INFO
+      # Rate Limiting Configuration
+      - RATE_LIMIT_DEFAULT=100/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_ENABLED=true
     ports:
       - "8002:8000"
     volumes:
@@ -174,13 +225,20 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-
   ingest_service:
     build:
       context: .
       dockerfile: ingest_service/Dockerfile
     env_file:
       - .env
+    environment:
+      - SERVICE_NAME=ingest_service
+      - LOG_LEVEL=INFO
+      # Rate Limiting Configuration
+      - RATE_LIMIT_DEFAULT=100/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_ENABLED=true
     ports:
       - "8003:8000"
     depends_on:
@@ -192,13 +250,20 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-
   rag_service:
     build:
       context: .
       dockerfile: rag_service/Dockerfile
     env_file:
       - .env
+    environment:
+      - SERVICE_NAME=rag_service
+      - LOG_LEVEL=INFO
+      # Rate Limiting Configuration
+      - RATE_LIMIT_DEFAULT=100/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_ENABLED=true
     ports:
       - "8004:8000"
     depends_on:
@@ -208,13 +273,20 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-
   prompt_service:
     build:
       context: .
       dockerfile: prompt_service/Dockerfile
     env_file:
       - .env
+    environment:
+      - SERVICE_NAME=prompt_service
+      - LOG_LEVEL=INFO
+      # Rate Limiting Configuration
+      - RATE_LIMIT_DEFAULT=100/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_ENABLED=true
     ports:
       - "8005:8000"
     depends_on:
@@ -224,13 +296,20 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-
   rulegen_service:
     build:
       context: .
       dockerfile: rulegen_service/Dockerfile
     env_file:
       - .env
+    environment:
+      - SERVICE_NAME=rulegen_service
+      - LOG_LEVEL=INFO
+      # Rate Limiting Configuration
+      - RATE_LIMIT_DEFAULT=100/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_ENABLED=true
     ports:
       - "8006:8000"
     depends_on:
@@ -245,6 +324,14 @@ services:
     build:
       context: .
       dockerfile: notifier/Dockerfile
+    environment:
+      - SERVICE_NAME=notifier
+      - LOG_LEVEL=INFO
+      # Rate Limiting Configuration - Stricter limits for notification service
+      - RATE_LIMIT_DEFAULT=50/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_ENABLED=true
     env_file:
       - .env
     ports:
@@ -256,10 +343,19 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+
   vms_service:
     build:
       context: .
       dockerfile: vms_service/Dockerfile
+    environment:
+      - SERVICE_NAME=vms_service
+      - LOG_LEVEL=INFO
+      # Rate Limiting Configuration
+      - RATE_LIMIT_DEFAULT=100/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_ENABLED=true
     env_file:
       - .env
     ports:
@@ -271,15 +367,22 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-
   # =============================================================================
   # ENHANCED AI SERVICES
   # =============================================================================
-
+  
   enhanced_prompt_service:
     build:
       context: .
       dockerfile: enhanced_prompt_service/Dockerfile
+    environment:
+      - SERVICE_NAME=enhanced_prompt_service
+      - LOG_LEVEL=INFO
+      # Rate Limiting Configuration
+      - RATE_LIMIT_DEFAULT=100/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_ENABLED=true
     env_file:
       - .env
     ports:
@@ -297,6 +400,15 @@ services:
     build:
       context: .
       dockerfile: websocket_service/Dockerfile
+    environment:
+      - SERVICE_NAME=websocket_service
+      - LOG_LEVEL=INFO
+      # Rate Limiting Configuration - Special limits for WebSocket service
+      - RATE_LIMIT_DEFAULT=100/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_WEBSOCKET=30/minute
+      - RATE_LIMIT_ENABLED=true
     env_file:
       - .env
     ports:
@@ -308,13 +420,20 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-
   agent_orchestrator:
     build:
       context: .
       dockerfile: agent_orchestrator/Dockerfile
     env_file:
       - .env
+    environment:
+      - SERVICE_NAME=agent_orchestrator
+      - LOG_LEVEL=INFO
+      # Rate Limiting Configuration
+      - RATE_LIMIT_DEFAULT=100/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_ENABLED=true
     ports:
       - "8011:8000"
     depends_on:
@@ -325,11 +444,69 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-
+  predictive_service:
+    build:
+      context: .
+      dockerfile: predictive_service_folder/Dockerfile
+    environment:
+      - SERVICE_NAME=predictive_service
+      - LOG_LEVEL=INFO
+      - DATABASE_URL=postgresql://surveillance_user:surveillance_pass_5487@postgres:5432/events_db
+      - MODEL_DIR=/app/models
+    env_file:
+      - .env
+    ports:
+      - "8013:8012"
+    depends_on:
+      - postgres
+    volumes:
+      - predictive_models:/app/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8012/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+  drift_service:
+    build:
+      context: .
+      dockerfile: drift_service_folder/Dockerfile
+    environment:
+      - SERVICE_NAME=drift_service
+      - LOG_LEVEL=INFO
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - INPUT_TOPIC=camera.detections
+      - OUTPUT_TOPIC=hard_examples
+      - CONSUMER_GROUP_ID=drift-service-group
+      - DRIFT_WINDOW_SIZE=1000
+      - DRIFT_THRESHOLD_SIGMA=2.0
+      # Rate Limiting Configuration
+      - RATE_LIMIT_DEFAULT=100/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_ENABLED=true
+    env_file:
+      - .env
+    ports:
+      - "8014:8000"
+    depends_on:
+      - kafka
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
   rule_builder_service:
     build:
       context: .
       dockerfile: rule_builder_service/Dockerfile
+    environment:
+      - SERVICE_NAME=rule_builder_service
+      - LOG_LEVEL=INFO
+      # Rate Limiting Configuration
+      - RATE_LIMIT_DEFAULT=100/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_ENABLED=true
     env_file:
       - .env
     ports:
@@ -341,13 +518,20 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-
   advanced_rag_service:
     build:
       context: .
       dockerfile: advanced_rag_service/Dockerfile
     env_file:
       - .env
+    environment:
+      - SERVICE_NAME=advanced_rag_service
+      - LOG_LEVEL=INFO
+      # Rate Limiting Configuration
+      - RATE_LIMIT_DEFAULT=100/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_ENABLED=true
     ports:
       - "8013:8000"
     depends_on:
@@ -358,15 +542,22 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-
   ai_dashboard_service:
     build:
       context: .
       dockerfile: ai_dashboard_service/Dockerfile
     env_file:
       - .env
+    environment:
+      - SERVICE_NAME=ai_dashboard_service
+      - LOG_LEVEL=INFO
+      # Rate Limiting Configuration
+      - RATE_LIMIT_DEFAULT=100/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_ENABLED=true
     ports:
-      - "8014:8000"  
+      - "8014:8000"
     depends_on:
       - postgres
       - weaviate
@@ -375,19 +566,189 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-
   voice_interface_service:
     build:
       context: .
       dockerfile: voice_interface_service/Dockerfile
     env_file:
       - .env
+    environment:
+      - SERVICE_NAME=voice_interface_service
+      - LOG_LEVEL=INFO
+      # Rate Limiting Configuration
+      - RATE_LIMIT_DEFAULT=100/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_ENABLED=true
     ports:
       - "8015:8000"
     depends_on:
       - websocket_service
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # =============================================================================
+  # CONTINUOUS LEARNING SERVICES
+  # =============================================================================
+  hard_example_collector:
+    build:
+      context: .
+      dockerfile: hard_example_collector/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8010:8000"
+    environment:
+      - SERVICE_NAME=hard_example_collector
+      - LOG_LEVEL=INFO
+      # Rate Limiting Configuration
+      - RATE_LIMIT_DEFAULT=100/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_ENABLED=true
+      # Data Collection Configuration
+      - INPUT_TOPIC=camera.events
+      - HARD_EXAMPLES_TOPIC=hard.examples
+      - FACE_CONFIDENCE_THRESHOLD=0.5
+      - PERSON_CONFIDENCE_THRESHOLD=0.6
+      - VEHICLE_CONFIDENCE_THRESHOLD=0.4
+      - DEFAULT_CONFIDENCE_THRESHOLD=0.5
+    depends_on:
+      - kafka
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+  annotation_frontend:
+    build:
+      context: .
+      dockerfile: annotation_frontend/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8011:8000"
+    environment:
+      - SERVICE_NAME=annotation_frontend
+      - LOG_LEVEL=INFO
+      # Rate Limiting Configuration
+      - RATE_LIMIT_DEFAULT=100/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_ENABLED=true
+      # Annotation Configuration
+      - HARD_EXAMPLES_TOPIC=hard.examples
+      - LABELED_EXAMPLES_TOPIC=labeled.examples
+    depends_on:
+      - kafka
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  training_service:
+    build:
+      context: .
+      dockerfile: training_service/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8012:8000"
+    environment:
+      - SERVICE_NAME=training_service
+      - LOG_LEVEL=INFO
+      # Rate Limiting Configuration
+      - RATE_LIMIT_DEFAULT=100/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_ENABLED=true
+      # Training Configuration
+      - LABELED_EXAMPLES_TOPIC=labeled.examples
+      - MIN_EXAMPLES_FOR_TRAINING=50
+      - TRAINING_SCHEDULE=0 2 * * *
+      - MODEL_OUTPUT_DIR=/models/output
+      - EDGE_SERVICE_URL=http://edge_service:8000
+      - TRAINING_DATA_DIR=/training_data
+    volumes:
+      - ./models:/models
+      - training_data:/training_data
+    depends_on:
+      - kafka
+      - edge_service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+  retention_service:
+    build:
+      context: .
+      dockerfile: retention_service/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8016:8000"
+    environment:
+      - SERVICE_NAME=retention_service
+      - LOG_LEVEL=INFO
+      # Rate Limiting Configuration
+      - RATE_LIMIT_DEFAULT=100/minute
+      - RATE_LIMIT_CONTACT=10/minute
+      - RATE_LIMIT_ALERTS=50/minute
+      - RATE_LIMIT_ENABLED=true
+      # Retention Configuration
+      - DB_URL=postgresql://surveillance_user:surveillance_pass_5487@postgres:5432/events_db
+      - STORAGE_PATH=/data/clips
+      - RETENTION_DAYS=30    volumes:
+      - ./data/clips:/data/clips
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  data_subject_service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8011:8011"    environment:
+      - SERVICE_NAME=data_subject_service
+      - LOG_LEVEL=INFO
+      # AWS Configuration for WORM Audit Logging
+      - AWS_S3_BUCKET=${AWS_S3_BUCKET:-surveillance-audit-logs}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_S3_PREFIX=${AWS_S3_PREFIX:-audit-logs}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      # Rate Limiting Configuration
+      - RATE_LIMIT_DEFAULT=10/minute
+      - RATE_LIMIT_CONTACT=5/minute
+      - RATE_LIMIT_ALERTS=10/minute
+      - RATE_LIMIT_ENABLED=true
+      # Database Configuration
+      - DATABASE_URL=postgresql://surveillance_user:surveillance_pass_5487@postgres:5432/events_db
+      - DB_URL=postgresql://surveillance_user:surveillance_pass_5487@postgres:5432/events_db
+      # Storage Configuration
+      - STORAGE_PATH=/data/clips
+      # WORM Logging Configuration
+      - WORM_ENABLED=true
+      - WORM_S3_BUCKET=${AWS_S3_BUCKET:-surveillance-audit-logs}
+      - WORM_S3_PREFIX=${AWS_S3_PREFIX:-audit-logs}/data-subject
+    volumes:
+      - ./data/clips:/data/clips
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8011/health"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -406,6 +767,10 @@ volumes:
   prometheus_data:
     driver: local
   grafana_data:
+    driver: local
+  training_data:
+    driver: local
+  predictive_models:
     driver: local
 
 # =============================================================================

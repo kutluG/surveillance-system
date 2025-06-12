@@ -1,6 +1,6 @@
 import BackgroundJob from 'react-native-background-job';
 import BackgroundTimer from 'react-native-background-timer';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from '../utils/secureStorage';
 import { AppState, Platform } from 'react-native';
 import NetInfo from '@react-native-netinfo/netinfo';
 import { store } from '../store';
@@ -130,7 +130,6 @@ class BackgroundTaskService {
       console.error('Error handling network reconnection:', error);
     }
   }
-
   async saveCurrentState() {
     try {
       const state = store.getState();
@@ -142,7 +141,7 @@ class BackgroundTaskService {
         app: state.app,
       };
 
-      await AsyncStorage.setItem('app_background_state', JSON.stringify(stateToSave));
+      await secureStorage.setItem('app_background_state', JSON.stringify(stateToSave));
     } catch (error) {
       console.error('Error saving current state:', error);
     }
@@ -225,9 +224,8 @@ class BackgroundTaskService {
 
       // Sync critical data only
       await this.syncCriticalData();
-      
-      this.lastSyncTime = new Date().toISOString();
-      await AsyncStorage.setItem('last_background_sync', this.lastSyncTime);
+        this.lastSyncTime = new Date().toISOString();
+      await secureStorage.setItem('last_background_sync', this.lastSyncTime);
     } catch (error) {
       console.error('Error performing background sync:', error);
     }
@@ -235,17 +233,15 @@ class BackgroundTaskService {
 
   async performForegroundSync() {
     try {
-      console.log('Performing foreground sync...');
-
-      // Get last sync time
-      const lastSync = await AsyncStorage.getItem('last_background_sync');
+      console.log('Performing foreground sync...');      // Get last sync time
+      const lastSync = await secureStorage.getItem('last_background_sync');
       const lastSyncTime = lastSync ? new Date(lastSync) : null;
 
       // Sync all data that might have changed
       await this.syncAllData(lastSyncTime);
       
       // Update last sync time
-      await AsyncStorage.setItem('last_foreground_sync', new Date().toISOString());
+      await secureStorage.setItem('last_foreground_sync', new Date().toISOString());
     } catch (error) {
       console.error('Error performing foreground sync:', error);
     }
@@ -254,15 +250,14 @@ class BackgroundTaskService {
   async performNetworkRecoverySync() {
     try {
       console.log('Performing network recovery sync...');
-      
-      // Get last successful sync time
-      const lastSync = await AsyncStorage.getItem('last_successful_sync');
+        // Get last successful sync time
+      const lastSync = await secureStorage.getItem('last_successful_sync');
       const lastSyncTime = lastSync ? new Date(lastSync) : null;
 
       // Sync data that might have been missed during network outage
       await this.syncMissedData(lastSyncTime);
       
-      await AsyncStorage.setItem('last_successful_sync', new Date().toISOString());
+      await secureStorage.setItem('last_successful_sync', new Date().toISOString());
     } catch (error) {
       console.error('Error performing network recovery sync:', error);
     }
@@ -364,12 +359,10 @@ class BackgroundTaskService {
       
       if (!response.ok) {
         throw new Error('Failed to fetch recordings');
-      }
-
-      const recordings = await response.json();
+      }      const recordings = await response.json();
       
       // Update recordings in local storage or state
-      await AsyncStorage.setItem('recent_recordings', JSON.stringify(recordings));
+      await secureStorage.setItem('recent_recordings', JSON.stringify(recordings));
     } catch (error) {
       console.error('Error syncing recordings:', error);
     }

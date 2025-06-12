@@ -1,5 +1,9 @@
-import authService from '../authService';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { authService } from '../authService';
+import secureStorage from '../../utils/secureStorage';
+
+// Mock secure storage
+jest.mock('../../utils/secureStorage');
+const mockSecureStorage = secureStorage;
 
 // Mock fetch globally
 global.fetch = jest.fn();
@@ -7,7 +11,9 @@ global.fetch = jest.fn();
 describe('authService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    AsyncStorage.clear();
+    mockSecureStorage.setItem.mockResolvedValue();
+    mockSecureStorage.getItem.mockResolvedValue(null);
+    mockSecureStorage.removeItem.mockResolvedValue();
   });
 
   describe('login', () => {
@@ -43,7 +49,7 @@ describe('authService', () => {
       );
 
       expect(result).toEqual(mockResponse);
-      expect(AsyncStorage.setItem).toHaveBeenCalledWith('auth_token', 'mock-jwt-token');
+      expect(mockSecureStorage.setItem).toHaveBeenCalledWith('auth_token', 'mock-jwt-token');
     });
 
     it('throws error for invalid credentials', async () => {
@@ -68,9 +74,8 @@ describe('authService', () => {
   });
 
   describe('logout', () => {
-    it('successfully logs out', async () => {
-      // Set up initial token
-      await AsyncStorage.setItem('auth_token', 'mock-token');
+    it('successfully logs out', async () => {      // Set up initial token
+      mockSecureStorage.getItem.mockResolvedValue('mock-token');
 
       fetch.mockResolvedValueOnce({
         ok: true,
@@ -82,21 +87,18 @@ describe('authService', () => {
       expect(fetch).toHaveBeenCalledWith(
         expect.stringContaining('/auth/logout'),
         expect.objectContaining({
-          method: 'POST',
-          headers: expect.objectContaining({
+          method: 'POST',        headers: expect.objectContaining({
             'Authorization': 'Bearer mock-token',
           }),
         })
       );
 
-      expect(AsyncStorage.removeItem).toHaveBeenCalledWith('auth_token');
+      expect(mockSecureStorage.removeItem).toHaveBeenCalledWith('auth_token');
     });
 
     it('handles logout errors gracefully', async () => {
-      fetch.mockRejectedValueOnce(new Error('Logout failed'));
-
-      await expect(authService.logout()).resolves.not.toThrow();
-      expect(AsyncStorage.removeItem).toHaveBeenCalledWith('auth_token');
+      fetch.mockRejectedValueOnce(new Error('Logout failed'));      await expect(authService.logout()).resolves.not.toThrow();
+      expect(mockSecureStorage.removeItem).toHaveBeenCalledWith('auth_token');
     });
   });
 
@@ -105,10 +107,9 @@ describe('authService', () => {
       const mockUser = {
         id: '1',
         email: 'test@example.com',
-        name: 'Test User',
-      };
+        name: 'Test User',      };
 
-      await AsyncStorage.setItem('auth_token', 'mock-token');
+      mockSecureStorage.getItem.mockResolvedValue('mock-token');
 
       fetch.mockResolvedValueOnce({
         ok: true,
@@ -135,7 +136,7 @@ describe('authService', () => {
     });
 
     it('handles invalid token', async () => {
-      await AsyncStorage.setItem('auth_token', 'invalid-token');
+      mockSecureStorage.getItem.mockResolvedValue('invalid-token');
 
       fetch.mockResolvedValueOnce({
         ok: false,
@@ -146,7 +147,7 @@ describe('authService', () => {
       const result = await authService.getCurrentUser();
 
       expect(result).toBeNull();
-      expect(AsyncStorage.removeItem).toHaveBeenCalledWith('auth_token');
+      expect(mockSecureStorage.removeItem).toHaveBeenCalledWith('auth_token');
     });
   });
 
@@ -157,7 +158,7 @@ describe('authService', () => {
         expiresIn: 3600,
       };
 
-      await AsyncStorage.setItem('auth_token', 'old-token');
+      mockSecureStorage.getItem.mockResolvedValue('old-token');
 
       fetch.mockResolvedValueOnce({
         ok: true,
@@ -177,11 +178,11 @@ describe('authService', () => {
       );
 
       expect(result).toEqual(mockResponse);
-      expect(AsyncStorage.setItem).toHaveBeenCalledWith('auth_token', 'new-jwt-token');
+      expect(mockSecureStorage.setItem).toHaveBeenCalledWith('auth_token', 'new-jwt-token');
     });
 
     it('throws error when refresh fails', async () => {
-      await AsyncStorage.setItem('auth_token', 'old-token');
+      mockSecureStorage.getItem.mockResolvedValue('old-token');
 
       fetch.mockResolvedValueOnce({
         ok: false,
@@ -195,7 +196,7 @@ describe('authService', () => {
 
   describe('isAuthenticated', () => {
     it('returns true when token exists', async () => {
-      await AsyncStorage.setItem('auth_token', 'mock-token');
+      mockSecureStorage.getItem.mockResolvedValue('mock-token');
       const result = await authService.isAuthenticated();
       expect(result).toBe(true);
     });
@@ -208,7 +209,7 @@ describe('authService', () => {
 
   describe('getToken', () => {
     it('returns stored token', async () => {
-      await AsyncStorage.setItem('auth_token', 'mock-token');
+      mockSecureStorage.getItem.mockResolvedValue('mock-token');
       const result = await authService.getToken();
       expect(result).toBe('mock-token');
     });
@@ -227,7 +228,7 @@ describe('authService', () => {
         name: 'Updated Name',
       };
 
-      await AsyncStorage.setItem('auth_token', 'mock-token');
+      mockSecureStorage.getItem.mockResolvedValue('mock-token');
 
       fetch.mockResolvedValueOnce({
         ok: true,
@@ -256,7 +257,7 @@ describe('authService', () => {
 
   describe('changePassword', () => {
     it('successfully changes password', async () => {
-      await AsyncStorage.setItem('auth_token', 'mock-token');
+      mockSecureStorage.getItem.mockResolvedValue('mock-token');
 
       fetch.mockResolvedValueOnce({
         ok: true,
@@ -287,7 +288,7 @@ describe('authService', () => {
     });
 
     it('throws error for incorrect current password', async () => {
-      await AsyncStorage.setItem('auth_token', 'mock-token');
+      mockSecureStorage.getItem.mockResolvedValue('mock-token');
 
       fetch.mockResolvedValueOnce({
         ok: false,

@@ -1,6 +1,9 @@
 fastapi
 uvicorn[standard]
+slowapi==0.1.9
 paho-mqtt
 confluent-kafka
 structlog
 prometheus_client
+python-json-logger>=2.0.0
+PyJWT>=2.0.0

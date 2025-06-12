@@ -10,12 +10,22 @@ from typing import Optional
 import paho.mqtt.client as mqtt
 from confluent_kafka import Producer
 from fastapi import FastAPI, HTTPException
-from shared.logging import get_logger
+from shared.logging_config import configure_logging, get_logger, log_context
+from shared.audit_middleware import add_audit_middleware
 from shared.metrics import instrument_app
+from shared.middleware import add_rate_limiting
 
-LOGGER = get_logger("mqtt_kafka_bridge")
+# Configure logging first
+logger = configure_logging("mqtt_kafka_bridge")
+
 app = FastAPI(title="MQTT-Kafka Bridge")
+
+# Add audit middleware
+add_audit_middleware(app, service_name="mqtt_kafka_bridge")
 instrument_app(app, service_name="mqtt_kafka_bridge")
+
+# Add rate limiting middleware
+add_rate_limiting(app, service_name="mqtt_kafka_bridge")
 
 # MQTT configuration
 MQTT_BROKER = os.getenv("MQTT_BROKER", "mqtt.example.com")
@@ -34,17 +44,17 @@ kafka_producer: Optional[Producer] = None
 
 def delivery_report(err, msg):
     if err:
-        LOGGER.error("Kafka delivery failed", error=str(err), topic=msg.topic())
+        logger.error("Kafka delivery failed", error=str(err), topic=msg.topic())
     else:
-        LOGGER.debug("Kafka message delivered", topic=msg.topic(), partition=msg.partition())
+        logger.debug("Kafka message delivered", topic=msg.topic(), partition=msg.partition())
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
-        LOGGER.info("Connected to MQTT broker", broker=MQTT_BROKER, port=MQTT_PORT)
+        logger.info("Connected to MQTT broker", broker=MQTT_BROKER, port=MQTT_PORT)
         client.subscribe(MQTT_TOPIC_SUB, qos=1)
-        LOGGER.info("Subscribed to MQTT topic", topic=MQTT_TOPIC_SUB)
+        logger.info("Subscribed to MQTT topic", topic=MQTT_TOPIC_SUB)
     else:
-        LOGGER.error("Failed to connect to MQTT", rc=rc)
+        logger.error("Failed to connect to MQTT", rc=rc)
 
 def on_message(client, userdata, msg):
     try:
@@ -54,14 +64,14 @@ def on_message(client, userdata, msg):
         # Forward raw JSON string to Kafka
         kafka_producer.produce(KAFKA_TOPIC, payload.encode("utf-8"), callback=delivery_report)
         kafka_producer.poll(0)
-        LOGGER.info("Bridged MQTT→Kafka", mqtt_topic=msg.topic, kafka_topic=KAFKA_TOPIC)
+        logger.info("Bridged MQTT→Kafka", mqtt_topic=msg.topic, kafka_topic=KAFKA_TOPIC)
     except json.JSONDecodeError:
-        LOGGER.error("Invalid JSON on MQTT", topic=msg.topic, payload=payload)
+        logger.error("Invalid JSON on MQTT", topic=msg.topic, payload=payload)
 
 @app.on_event("startup")
 async def startup_event():
     global bridge_client, kafka_producer
-    LOGGER.info("Starting MQTT-Kafka bridge")
+    logger.info("Starting MQTT-Kafka bridge")
     # Kafka producer
     kafka_producer = Producer({"bootstrap.servers": KAFKA_BROKER})
     # MQTT client
@@ -71,7 +81,7 @@ async def startup_event():
     if (os.path.exists(MQTT_TLS_CA) and 
         os.path.exists(MQTT_TLS_CERT) and 
         os.path.exists(MQTT_TLS_KEY)):
-        LOGGER.info("Configuring MQTT with TLS")
+        logger.info("Configuring MQTT with TLS")
         bridge_client.tls_set(
             ca_certs=MQTT_TLS_CA,
             certfile=MQTT_TLS_CERT,
@@ -80,7 +90,7 @@ async def startup_event():
         )
         bridge_client.tls_insecure_set(False)
     else:
-        LOGGER.warning("TLS certificates not found - connecting without TLS")
+        logger.warning("TLS certificates not found - connecting without TLS")
         # Use non-secure port for testing
         global MQTT_PORT
         MQTT_PORT = int(os.getenv("MQTT_PORT_INSECURE", "1883"))
@@ -97,7 +107,7 @@ async def shutdown_event():
         bridge_client.disconnect()
     if kafka_producer:
         kafka_producer.flush()
-    LOGGER.info("MQTT-Kafka bridge shutdown complete")
+    logger.info("MQTT-Kafka bridge shutdown complete")
 
 @app.get("/health")
 async def health():

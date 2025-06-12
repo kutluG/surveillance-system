@@ -180,6 +180,14 @@ const AlertsScreen = ({ navigation }) => {
         return COLORS.textSecondary;
     }
   };
+  const handleAcknowledgeSingle = async (alertId, event) => {
+    event?.stopPropagation(); // Prevent triggering card press
+    try {
+      await dispatch(acknowledgeAlert(alertId)).unwrap();
+    } catch (error) {
+      Alert.alert('Error', 'Failed to acknowledge alert');
+    }
+  };
 
   const renderAlert = ({ item }) => (
     <TouchableOpacity
@@ -188,6 +196,7 @@ const AlertsScreen = ({ navigation }) => {
       style={[
         styles.alertContainer,
         selectedAlerts.has(item.id) && styles.selectedAlert,
+        item.status === 'acknowledged' && styles.acknowledgedAlert,
       ]}
     >
       <Card style={styles.alertCard}>
@@ -218,6 +227,31 @@ const AlertsScreen = ({ navigation }) => {
               <Text style={styles.statusText}>{item.status.toUpperCase()}</Text>
             </View>
           </View>
+        </View>
+        
+        {/* Actions Row */}
+        <View style={styles.alertActions}>
+          {item.status === 'new' && (
+            <TouchableOpacity
+              style={styles.acknowledgeButton}
+              onPress={(event) => handleAcknowledgeSingle(item.id, event)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.acknowledgeButtonText}>✓ Acknowledge</Text>
+            </TouchableOpacity>
+          )}          {item.status === 'acknowledged' && (
+            <View style={styles.acknowledgedIndicator}>
+              <Text style={styles.acknowledgedText}>✓ Acknowledged</Text>
+              {item.acknowledgedAt && (
+                <Text style={styles.acknowledgedTime}>
+                  {formatRelativeTime(item.acknowledgedAt)}
+                </Text>
+              )}
+              {item.pendingSync && (
+                <Text style={styles.pendingSyncText}>⏳ Syncing...</Text>
+              )}
+            </View>
+          )}
         </View>
         
         {item.thumbnail && (
@@ -475,9 +509,11 @@ const styles = StyleSheet.create({
   },
   alertContainer: {
     marginBottom: SIZES.margin,
-  },
-  selectedAlert: {
+  },  selectedAlert: {
     transform: [{ scale: 0.98 }],
+  },
+  acknowledgedAlert: {
+    opacity: 0.7,
   },
   alertCard: {
     padding: SIZES.padding,
@@ -520,6 +556,44 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     ...FONTS.body5,
     marginBottom: 4,
+  },
+  alertActions: {
+    marginTop: SIZES.margin,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  acknowledgeButton: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: SIZES.radius,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  acknowledgeButtonText: {
+    color: COLORS.white,
+    ...FONTS.body4,
+    fontWeight: 'bold',
+  },
+  acknowledgedIndicator: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+  },
+  acknowledgedText: {
+    color: COLORS.success,
+    ...FONTS.body4,
+    fontWeight: 'bold',
+  },  acknowledgedTime: {
+    color: COLORS.textSecondary,
+    ...FONTS.body5,
+    marginTop: 2,
+  },
+  pendingSyncText: {
+    color: COLORS.warning,
+    ...FONTS.body5,
+    marginTop: 2,
+    fontStyle: 'italic',
   },
   statusBadge: {
     paddingHorizontal: 8,

@@ -1,5 +1,5 @@
 import ReactNativeBiometrics from 'react-native-biometrics';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from '../utils/secureStorage';
 import { Alert } from 'react-native';
 
 class BiometricService {
@@ -24,20 +24,18 @@ class BiometricService {
       return { available: false, isSupported: false };
     }
   }
-
   async isBiometricEnabled() {
     try {
-      const enabled = await AsyncStorage.getItem('biometric_enabled');
+      const enabled = await secureStorage.getItem('biometric_enabled');
       return enabled === 'true';
     } catch (error) {
       console.error('Error checking biometric setting:', error);
       return false;
     }
   }
-
   async setBiometricEnabled(enabled) {
     try {
-      await AsyncStorage.setItem('biometric_enabled', enabled.toString());
+      await secureStorage.setItem('biometric_enabled', enabled.toString());
       return true;
     } catch (error) {
       console.error('Error setting biometric preference:', error);

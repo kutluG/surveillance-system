@@ -1,0 +1,390 @@
+name: Chaos Engineering Tests
+
+on:
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      namespace:
+        description: 'Kubernetes namespace for chaos tests'
+        required: false
+        default: 'chaos'
+        type: string
+      skip_deploy:
+        description: 'Skip deployment and run chaos test only'
+        required: false
+        default: false
+        type: boolean
+
+  # Nightly schedule at 02:30 UTC
+  schedule:
+    - cron: '30 2 * * *'
+
+env:
+  PYTHON_VERSION: '3.10'
+  NAMESPACE: ${{ inputs.namespace || 'chaos' }}
+
+jobs:
+  setup:
+    name: Setup Environment
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.setup-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt', 'pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install kubernetes pytest pytest-mock requests paho-mqtt psycopg2-binary
+
+      - name: Validate chaos test script
+        run: |
+          python -m py_compile infra/chaos_test.py
+          echo "✅ Chaos test script syntax is valid"
+
+      - name: Setup test matrix
+        id: setup-matrix
+        run: |
+          echo "matrix={\"namespace\":[\"${{ env.NAMESPACE }}\"]}" >> $GITHUB_OUTPUT
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: setup
+    if: ${{ !inputs.skip_deploy }}
+    strategy:
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+          kubectl version --client
+
+      - name: Create namespace if not exists
+        run: |
+          kubectl create namespace ${{ matrix.namespace }} --dry-run=client -o yaml | kubectl apply -f -
+          echo "✅ Namespace ${{ matrix.namespace }} ready"
+
+      - name: Deploy infrastructure services
+        run: |
+          echo "🚀 Deploying infrastructure to namespace: ${{ matrix.namespace }}"
+          
+          # Create ConfigMaps and Secrets
+          kubectl create configmap chaos-config \
+            --namespace=${{ matrix.namespace }} \
+            --from-literal=postgres_db=events_db \
+            --from-literal=postgres_user=surveillance_user \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Deploy PostgreSQL
+          cat <<EOF | kubectl apply -f -
+          apiVersion: apps/v1
+          kind: StatefulSet
+          metadata:
+            name: postgres
+            namespace: ${{ matrix.namespace }}
+          spec:
+            serviceName: postgres
+            replicas: 1
+            selector:
+              matchLabels:
+                app: postgres
+            template:
+              metadata:
+                labels:
+                  app: postgres
+              spec:
+                containers:
+                - name: postgres
+                  image: postgres:15
+                  env:
+                  - name: POSTGRES_DB
+                    value: events_db
+                  - name: POSTGRES_USER
+                    value: surveillance_user
+                  - name: POSTGRES_PASSWORD
+                    value: surveillance_pass_5487
+                  ports:
+                  - containerPort: 5432
+                  readinessProbe:
+                    exec:
+                      command:
+                      - pg_isready
+                      - -U
+                      - surveillance_user
+                      - -d
+                      - events_db
+                    initialDelaySeconds: 5
+                    periodSeconds: 10
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: postgres
+            namespace: ${{ matrix.namespace }}
+          spec:
+            selector:
+              app: postgres
+            ports:
+            - port: 5432
+              targetPort: 5432
+          EOF
+
+      - name: Deploy Kafka StatefulSet
+        run: |
+          cat <<EOF | kubectl apply -f -
+          apiVersion: apps/v1
+          kind: StatefulSet
+          metadata:
+            name: kafka
+            namespace: ${{ matrix.namespace }}
+          spec:
+            serviceName: kafka
+            replicas: 2
+            selector:
+              matchLabels:
+                app: kafka
+            template:
+              metadata:
+                labels:
+                  app: kafka
+              spec:
+                containers:
+                - name: kafka
+                  image: confluentinc/cp-kafka:7.4.0
+                  env:
+                  - name: KAFKA_BROKER_ID
+                    valueFrom:
+                      fieldRef:
+                        fieldPath: metadata.name
+                  - name: KAFKA_ZOOKEEPER_CONNECT
+                    value: zookeeper:2181
+                  - name: KAFKA_ADVERTISED_LISTENERS
+                    value: PLAINTEXT://\$(hostname -f):9092
+                  - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+                    value: "1"
+                  - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+                    value: "true"
+                  ports:
+                  - containerPort: 9092
+                  readinessProbe:
+                    exec:
+                      command:
+                      - kafka-topics
+                      - --bootstrap-server
+                      - localhost:9092
+                      - --list
+                    initialDelaySeconds: 30
+                    periodSeconds: 10
+                    timeoutSeconds: 5
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: kafka
+            namespace: ${{ matrix.namespace }}
+          spec:
+            selector:
+              app: kafka
+            ports:
+            - port: 9092
+              targetPort: 9092
+          EOF
+
+      - name: Deploy RAG Service
+        run: |
+          cat <<EOF | kubectl apply -f -
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: rag-service
+            namespace: ${{ matrix.namespace }}
+          spec:
+            replicas: 2
+            selector:
+              matchLabels:
+                app: rag-service
+            template:
+              metadata:
+                labels:
+                  app: rag-service
+              spec:
+                containers:
+                - name: rag-service
+                  image: surveillance/rag-service:latest
+                  env:
+                  - name: WEAVIATE_URL
+                    value: http://weaviate:8080
+                  - name: OPENAI_API_KEY
+                    value: ${{ secrets.OPENAI_API_KEY }}
+                  ports:
+                  - containerPort: 8000
+                  readinessProbe:
+                    httpGet:
+                      path: /health
+                      port: 8000
+                    initialDelaySeconds: 10
+                    periodSeconds: 5
+                    timeoutSeconds: 3
+                  livenessProbe:
+                    httpGet:
+                      path: /health
+                      port: 8000
+                    initialDelaySeconds: 30
+                    periodSeconds: 10
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: rag-service
+            namespace: ${{ matrix.namespace }}
+          spec:
+            selector:
+              app: rag-service
+            ports:
+            - port: 8000
+              targetPort: 8000
+          EOF
+
+      - name: Wait for services to be ready
+        run: |
+          echo "⏳ Waiting for services to be ready..."
+          kubectl wait --for=condition=ready pod -l app=postgres -n ${{ matrix.namespace }} --timeout=300s
+          kubectl wait --for=condition=ready pod -l app=kafka -n ${{ matrix.namespace }} --timeout=300s
+          kubectl wait --for=condition=ready pod -l app=rag-service -n ${{ matrix.namespace }} --timeout=300s
+          echo "✅ All services are ready"
+
+  run-chaos-test:
+    name: Execute Chaos Tests
+    runs-on: ubuntu-latest
+    needs: [setup, deploy-staging]
+    if: always() && (needs.setup.result == 'success' && (needs.deploy-staging.result == 'success' || needs.deploy-staging.result == 'skipped'))
+    strategy:
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install kubernetes requests paho-mqtt psycopg2-binary
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+          kubectl config set-context --current --namespace=${{ matrix.namespace }}
+
+      - name: Setup port forwarding
+        run: |
+          echo "🔧 Setting up port forwarding for services..."
+          
+          # Port forward MQTT (if using local broker)
+          kubectl port-forward service/mqtt-broker 1883:1883 -n ${{ matrix.namespace }} &
+          
+          # Port forward PostgreSQL
+          kubectl port-forward service/postgres 5432:5432 -n ${{ matrix.namespace }} &
+          
+          # Port forward RAG service
+          kubectl port-forward service/rag-service 8004:8000 -n ${{ matrix.namespace }} &
+          
+          # Wait for port forwards to establish
+          sleep 10
+          echo "✅ Port forwarding established"
+
+      - name: Run chaos engineering tests
+        env:
+          KUBECONFIG: ${{ runner.workspace }}/.kube/config
+          NAMESPACE: ${{ matrix.namespace }}
+          KAFKA_STATEFULSET: kafka
+          RAG_DEPLOYMENT: rag-service
+          MQTT_URL: tcp://localhost:1883
+          POSTGRES_URL: postgresql://surveillance_user:surveillance_pass_5487@localhost:5432/events_db
+          RAG_URL: http://localhost:8004
+        run: |
+          echo "🎯 Starting chaos engineering tests..."
+          python infra/chaos_test.py
+
+      - name: Collect test artifacts
+        if: always()
+        run: |
+          echo "📋 Collecting test artifacts..."
+          kubectl get pods -n ${{ matrix.namespace }} -o wide > chaos-test-pods.log
+          kubectl get events -n ${{ matrix.namespace }} --sort-by='.lastTimestamp' > chaos-test-events.log
+          kubectl describe pods -n ${{ matrix.namespace }} > chaos-test-pod-details.log
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: chaos-test-artifacts-${{ matrix.namespace }}
+          path: |
+            chaos-test-*.log
+          retention-days: 7
+
+      - name: Cleanup port forwarding
+        if: always()
+        run: |
+          echo "🧹 Cleaning up port forwarding..."
+          pkill -f "kubectl port-forward" || true
+
+  cleanup:
+    name: Cleanup Resources
+    runs-on: ubuntu-latest
+    needs: [run-chaos-test]
+    if: always() && !inputs.skip_deploy
+    steps:
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      - name: Cleanup test namespace
+        run: |
+          echo "🧹 Cleaning up namespace: ${{ env.NAMESPACE }}"
+          kubectl delete namespace ${{ env.NAMESPACE }} --ignore-not-found=true --timeout=300s
+          echo "✅ Cleanup completed"
+
+  notify:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: [run-chaos-test]
+    if: always()
+    steps:
+      - name: Notify on success
+        if: needs.run-chaos-test.result == 'success'
+        run: |
+          echo "🎉 Chaos engineering tests passed!"
+          # Add your notification logic here (Slack, Teams, email, etc.)
+
+      - name: Notify on failure
+        if: needs.run-chaos-test.result == 'failure'
+        run: |
+          echo "💥 Chaos engineering tests failed!"
+          # Add your notification logic here (Slack, Teams, email, etc.)
+          exit 1

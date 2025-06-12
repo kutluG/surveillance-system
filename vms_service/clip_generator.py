@@ -6,10 +6,10 @@ import cv2
 import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
-from shared.logging import get_logger
+from shared.logging_config import get_logger, log_context
 import numpy as np 
 
-LOGGER = get_logger("vms_service")
+logger = get_logger("vms_service")
 
 class ClipGenerator:
     """Generates video clips from camera streams around specific events."""
@@ -41,7 +41,7 @@ class ClipGenerator:
             Video clip data as bytes
         """
         try:
-            LOGGER.info("Generating video clip", event_id=event_id, camera_id=camera_id)
+            logger.info("Generating video clip", extra={"event_id": event_id, "camera_id": camera_id})
             
             # Calculate clip time range
             start_time = event_timestamp - timedelta(seconds=self.pre_event_buffer)
@@ -59,11 +59,11 @@ class ClipGenerator:
                 event_id
             )
             
-            LOGGER.info("Video clip generated", event_id=event_id, size_bytes=len(clip_data))
+            logger.info("Video clip generated", extra={"event_id": event_id, "size_bytes": len(clip_data)})
             return clip_data
             
         except Exception as e:
-            LOGGER.error("Failed to generate video clip", event_id=event_id, error=str(e))
+            logger.error("Failed to generate video clip", extra={"event_id": event_id, "error": str(e)})
             raise
     
     def _get_camera_url(self, camera_id: str) -> str:
@@ -100,7 +100,7 @@ class ClipGenerator:
             return await self._create_synthetic_clip(event_id)
             
         except Exception as e:
-            LOGGER.error("Failed to capture clip", event_id=event_id, error=str(e))
+            logger.error("Failed to capture clip", extra={"event_id": event_id, "error": str(e)})
             raise
     
     async def _create_synthetic_clip(self, event_id: str) -> bytes:

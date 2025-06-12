@@ -67,23 +67,26 @@ const Button = ({
     
     return baseStyle;
   };
-
   return (
     <TouchableOpacity
       style={getButtonStyle()}
       onPress={onPress}
       disabled={disabled || loading}
       activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={props.accessibilityLabel || title}
+      accessibilityState={{ disabled: disabled || loading }}
       {...props}
     >
       {loading ? (
         <ActivityIndicator 
           size="small" 
           color={variant === 'outline' || variant === 'ghost' ? COLORS.primary : COLORS.white} 
+          testID="loading-indicator"
         />
       ) : (
         <>
-          {icon}
+          {icon && <Text testID="button-icon">{icon}</Text>}
           <Text style={getTextStyle()}>{title}</Text>
         </>
       )}

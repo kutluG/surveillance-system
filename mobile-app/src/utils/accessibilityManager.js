@@ -4,7 +4,7 @@
  */
 
 import { AccessibilityInfo, Alert, Vibration } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import secureStorage from './secureStorage';
 import performanceMonitor from './performanceMonitor';
 
 class AccessibilityManager {
@@ -106,10 +106,9 @@ class AccessibilityManager {
 
   /**
    * Load accessibility preferences from storage
-   */
-  async loadPreferences() {
+   */  async loadPreferences() {
     try {
-      const stored = await AsyncStorage.getItem('@accessibility_preferences');
+      const stored = await secureStorage.getItem('@accessibility_preferences');
       if (stored) {
         this.preferences = { ...this.preferences, ...JSON.parse(stored) };
         console.log('♿ Accessibility preferences loaded:', this.preferences);
@@ -124,7 +123,7 @@ class AccessibilityManager {
    */
   async savePreferences() {
     try {
-      await AsyncStorage.setItem('@accessibility_preferences', JSON.stringify(this.preferences));
+      await secureStorage.setItem('@accessibility_preferences', JSON.stringify(this.preferences));
       console.log('♿ Accessibility preferences saved');
     } catch (error) {
       console.error('❌ Failed to save accessibility preferences:', error);
