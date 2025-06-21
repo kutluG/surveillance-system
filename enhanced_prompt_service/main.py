@@ -1,13 +1,24 @@
 """
 Enhanced Prompt Service: Advanced conversational AI with context and follow-ups.
 """
-from fastapi import FastAPI, HTTPException, Depends
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Depends, Request, WebSocket
+from fastapi.openapi.utils import get_openapi
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, RedirectResponse
 from typing import List, Optional, Dict, Any
 import json
 import uuid
-from datetime import datetime, timedelta
+import re
+import os
 import redis
+import redis.asyncio
+import weaviate
+from openai import OpenAI
+from urllib.parse import urlparse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from shared.logging_config import configure_logging, get_logger, log_context
 from shared.audit_middleware import add_audit_middleware
@@ -15,19 +26,259 @@ from shared.metrics import instrument_app
 from shared.models import QueryResult
 from shared.auth import get_current_user, TokenData
 from shared.middleware import add_rate_limiting
+from shared.config import get_service_config, Settings
 
-from .weaviate_client import semantic_search
-from clip_store import get_clip_url
-from .conversation_manager import ConversationManager
-from llm_client import generate_conversational_response, generate_follow_up_questions
+from enhanced_prompt_service.conversation_manager import ConversationManager
+from enhanced_prompt_service.schemas import HealthResponse, ErrorResponse
+from enhanced_prompt_service.routers import prompt, history
+
+# Get service configuration
+config = get_service_config("enhanced_prompt_service")
+settings = Settings()
 
 # Configure logging first
 logger = configure_logging("enhanced_prompt_service")
 
+# Dependency injection functions
+async def get_redis(request: Request) -> redis.Redis:
+    """Get Redis client from app state."""
+    return request.app.state.redis_client
+
+async def get_weaviate(request: Request):
+    """Get Weaviate client from app state."""
+    return request.app.state.weaviate_client
+
+async def get_openai(request: Request) -> OpenAI:
+    """Get OpenAI client from app state."""
+    return request.app.state.openai_client
+
+async def get_conversation_manager(request: Request) -> ConversationManager:
+    """Get ConversationManager from app state."""
+    return request.app.state.conversation_manager
+
+async def startup_event():
+    """Initialize all external service connections on startup."""
+    logger.info("Starting Enhanced Prompt Service...")
+    
+    try:
+        # Initialize Redis client with async support
+        redis_url = settings.redis_url
+        parsed_url = urlparse(redis_url)
+        redis_client = redis.asyncio.Redis(
+            host=parsed_url.hostname or 'redis',
+            port=parsed_url.port or 6379,
+            decode_responses=True,
+            socket_timeout=5,
+            socket_connect_timeout=5
+        )
+        # Test Redis connection
+        await redis_client.ping()
+        logger.info("Redis connection established")
+        
+        # Initialize Weaviate client
+        weaviate_client = weaviate.connect_to_local(
+            host=parsed_url.hostname or 'localhost',
+            port=8080,
+            grpc_port=50051
+        ) if settings.weaviate_url.startswith('http://localhost') else weaviate.connect_to_custom(
+            http_host=urlparse(settings.weaviate_url).hostname,
+            http_port=urlparse(settings.weaviate_url).port or 8080,
+            http_secure=settings.weaviate_url.startswith('https'),
+            grpc_host=urlparse(settings.weaviate_url).hostname,
+            grpc_port=50051,
+            grpc_secure=settings.weaviate_url.startswith('https')
+        )
+        
+        # Test Weaviate connection
+        if not weaviate_client.is_ready():
+            raise Exception("Weaviate is not ready")
+        logger.info("Weaviate connection established")
+        
+        # Initialize OpenAI client
+        openai_client = OpenAI(api_key=settings.openai_api_key)
+        logger.info("OpenAI client initialized")
+        
+        # Initialize ConversationManager with async Redis client
+        conversation_manager = ConversationManager(redis_client)
+        logger.info("ConversationManager initialized")
+        
+        # Store clients in app state
+        app.state.redis_client = redis_client
+        app.state.weaviate_client = weaviate_client
+        app.state.openai_client = openai_client
+        app.state.conversation_manager = conversation_manager
+        
+        logger.info("Enhanced Prompt Service startup complete")
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize services: {e}")
+        raise
+
+async def shutdown_event():
+    """Clean up connections on shutdown."""
+    logger.info("Shutting down Enhanced Prompt Service...")
+    
+    try:
+        # Close Weaviate connection
+        if hasattr(app.state, 'weaviate_client'):
+            app.state.weaviate_client.close()
+            logger.info("Weaviate connection closed")
+        
+        # Redis connections are automatically managed
+        logger.info("Enhanced Prompt Service shutdown complete")
+        
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
+
 app = FastAPI(
     title="Enhanced Prompt Service",
-    openapi_prefix="/api/v1"
+    description="Advanced conversational AI with context and follow-ups for surveillance systems",
+    version="1.3.0",
+    contact={
+        "name": "Surveillance System Team",
+        "email": "support@surveillance-system.com",
+    },
+    license_info={
+        "name": "MIT",
+        "url": "https://opensource.org/licenses/MIT",
+    },
 )
+
+# Global exception handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Global exception handler that returns uniform JSON error responses."""
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    
+    # Handle different types of exceptions
+    if isinstance(exc, HTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,            content=ErrorResponse(
+                error=exc.detail,
+                detail=str(exc.detail),
+                code=str(exc.status_code)
+            ).model_dump()
+        )
+    elif isinstance(exc, ValueError):
+        return JSONResponse(
+            status_code=500,            content=ErrorResponse(
+                error="Internal server error",
+                detail="A validation error occurred",
+                code="500"
+            ).model_dump()
+        )
+    else:
+        return JSONResponse(
+            status_code=500,            content=ErrorResponse(
+                error="Internal server error",
+                detail="An unexpected error occurred",
+                code="500"
+            ).model_dump()
+        )
+
+# Handle 404 errors
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc: HTTPException):
+    """Handle 404 Not Found errors."""
+    return JSONResponse(
+        status_code=404,        content=ErrorResponse(
+            error="Not Found",
+            detail="The requested resource was not found",
+            code="404"
+        ).model_dump()
+    )
+
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Configure CORS with strict policy
+allowed_origins = [
+    "https://surveillance-dashboard.local",
+    "https://localhost:3000",  # For development
+    "https://127.0.0.1:3000",  # For development
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+
+# Custom OpenAPI schema generation
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    
+    openapi_schema = get_openapi(
+        title="Enhanced Prompt Service API",
+        version="1.3.0",
+        description="""
+        ## Enhanced Prompt Service
+
+        A sophisticated conversational AI service that provides intelligent, context-aware responses 
+        for surveillance system queries. This service combines semantic search, large language models, 
+        and conversation memory to deliver enhanced user experiences.
+
+        ### Key Features:
+        - **Semantic Search**: Vector-based search through surveillance events
+        - **Conversational AI**: Context-aware responses with conversation memory
+        - **Clip Integration**: Automatic video clip URL generation
+        - **Follow-up Questions**: Intelligent suggestion of relevant next questions
+        - **Proactive Insights**: Pattern detection and anomaly identification
+
+        ### Authentication:
+        All endpoints require a valid JWT token in the Authorization header:
+        ```
+        Authorization: Bearer YOUR_JWT_TOKEN
+        ```
+
+        ### Rate Limiting:
+        - 100 requests per minute per user
+        - 20 requests per 10 seconds burst limit
+        """,
+        routes=app.routes,
+        contact={
+            "name": "Surveillance System Team",
+            "email": "support@surveillance-system.com",
+        },
+        license_info={
+            "name": "MIT",
+            "url": "https://opensource.org/licenses/MIT",
+        },
+    )
+    
+    # Add additional schema customizations
+    openapi_schema["info"]["x-logo"] = {
+        "url": "https://fastapi.tiangolo.com/img/logo-margin/logo-teal.png"
+    }
+    
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
+
+# Export OpenAPI schema on startup (for CI/CD and documentation)
+@app.on_event("startup")
+async def export_openapi_schema():
+    """Export OpenAPI schema to JSON file for documentation and tooling."""
+    try:
+        docs_dir = os.path.join(os.path.dirname(__file__), "docs")
+        os.makedirs(docs_dir, exist_ok=True)
+        
+        schema_path = os.path.join(docs_dir, "enhanced_prompt_openapi.json")
+        
+        # Generate and save OpenAPI schema
+        openapi_schema = custom_openapi()
+        with open(schema_path, "w", encoding="utf-8") as f:
+            json.dump(openapi_schema, f, indent=2, ensure_ascii=False)
+        
+        logger.info(f"OpenAPI schema exported to {schema_path}")
+    except Exception as e:
+        logger.warning(f"Failed to export OpenAPI schema: {e}")
 
 # Add audit middleware
 add_audit_middleware(app, service_name="enhanced_prompt_service")
@@ -36,423 +287,118 @@ instrument_app(app, service_name="enhanced_prompt_service")
 # Add rate limiting middleware
 add_rate_limiting(app, service_name="enhanced_prompt_service")
 
-# Redis for conversation memory
-redis_client = redis.Redis(host='redis', port=6379, decode_responses=True)
-conversation_manager = ConversationManager(redis_client)
+# Include routers with versioned paths
+app.include_router(
+    prompt.router,
+    prefix=settings.api_base_path,
+    tags=["prompt"],
+    dependencies=[Depends(get_current_user)]
+)
 
-class ConversationRequest(BaseModel):
-    query: str
-    conversation_id: Optional[str] = None
-    user_context: Optional[Dict[str, Any]] = None
-    limit: int = 5
+app.include_router(
+    history.router,
+    prefix=f"{settings.api_base_path}/history",
+    tags=["history"],
+    dependencies=[Depends(get_current_user)]
+)
 
-class ConversationResponse(BaseModel):
-    conversation_id: str
-    response: str
-    follow_up_questions: List[str]
-    evidence: List[Dict[str, Any]]
-    clip_links: List[str]
-    confidence_score: float
-    response_type: str  # "answer", "clarification", "proactive_insight"
-    metadata: Dict[str, Any]
+# Legacy redirect handlers for unversioned API paths
+@app.get("/api/{path:path}")
+async def redirect_unversioned_api(path: str):
+    """Redirect legacy unversioned API paths to versioned ones."""
+    target = f"{settings.api_base_path}/{path}"
+    logger.info(f"Redirecting legacy API path /api/{path} to {target}")
+    return RedirectResponse(url=target, status_code=301)
 
-class ProactiveInsightRequest(BaseModel):
-    time_range: str = "24h"
-    severity_threshold: str = "medium"
-    include_predictions: bool = True
+# WebSocket redirect handler for future WebSocket endpoints
+@app.websocket("/ws/{path:path}")
+async def redirect_unversioned_websocket(websocket: WebSocket, path: str):
+    """Redirect legacy unversioned WebSocket paths to versioned ones."""
+    try:
+        await websocket.accept()
+        target = f"/ws/v1/{path}"
+        logger.info(f"WebSocket redirect requested from /ws/{path} to {target}")
+        await websocket.close(
+            code=3000,  # Custom code for redirect
+            reason=f"Redirecting to {target}"
+        )
+    except Exception as e:
+        logger.error(f"Error during WebSocket redirect: {e}")
+        try:
+            await websocket.close(code=1011, reason="Redirect failed")
+        except:
+            pass
 
-@app.get("/health")
+# Basic health endpoints
+@app.get("/health", response_model=HealthResponse)
 async def health():
-    return {"status": "ok"}
+    """Basic health check endpoint - always returns OK if service is running."""
+    return HealthResponse(status="ok")
 
-@app.post("/api/v1/conversation", response_model=ConversationResponse)
-async def enhanced_conversation(
-    req: ConversationRequest,
-    current_user: TokenData = Depends(get_current_user)
-):
-    """Enhanced conversational interface with context and follow-ups."""
-    logger.info("Enhanced conversation request", 
-                query=req.query, 
-                conversation_id=req.conversation_id,
-                user=current_user.sub)
-    
-    try:
-        # Get or create conversation context
-        if req.conversation_id:
-            conversation = await conversation_manager.get_conversation(req.conversation_id)
-        else:
-            conversation = await conversation_manager.create_conversation(
-                user_id=current_user.sub,
-                initial_context=req.user_context or {}
-            )
-        
-        # Add current query to conversation history
-        await conversation_manager.add_message(
-            conversation["id"], 
-            "user", 
-            req.query,
-            metadata=req.user_context
-        )
-        
-        # Get conversation context for better AI responses
-        conversation_history = await conversation_manager.get_recent_messages(
-            conversation["id"], 
-            limit=10
-        )
-        
-        # Enhanced semantic search with conversation context
-        contexts = await enhanced_semantic_search(
-            req.query, 
-            conversation_history,
-            limit=req.limit
-        )
-        
-        # Generate contextual AI response
-        ai_response = await generate_conversational_response(
-            query=req.query,
-            conversation_history=conversation_history,
-            evidence=contexts,
-            user_context=req.user_context or {}
-        )
-        
-        # Generate intelligent follow-up questions
-        follow_ups = await generate_follow_up_questions(
-            query=req.query,
-            response=ai_response["response"],
-            evidence=contexts,
-            conversation_context=conversation_history
-        )
-        
-        # Generate clip links with enhanced metadata
-        clip_links = []
-        for ctx in contexts:
-            clip_url = get_clip_url(ctx["event_id"])
-            clip_links.append({
-                "url": clip_url,
-                "event_id": ctx["event_id"],
-                "timestamp": ctx["timestamp"],
-                "camera_id": ctx["camera_id"],
-                "confidence": ctx.get("confidence", 0.0),
-                "description": ctx.get("description", "")
-            })
-        
-        # Store AI response in conversation
-        await conversation_manager.add_message(
-            conversation["id"],
-            "assistant",
-            ai_response["response"],
-            metadata={
-                "confidence": ai_response["confidence"],
-                "evidence_count": len(contexts),
-                "response_type": ai_response["type"]
-            }
-        )
-        
-        response = ConversationResponse(
-            conversation_id=conversation["id"],
-            response=ai_response["response"],
-            follow_up_questions=follow_ups,
-            evidence=[{
-                "event_id": ctx["event_id"],
-                "timestamp": ctx["timestamp"],
-                "camera_id": ctx["camera_id"],
-                "event_type": ctx["event_type"],
-                "confidence": ctx.get("confidence", 0.0),
-                "description": ctx.get("description", "")
-            } for ctx in contexts],
-            clip_links=[link["url"] for link in clip_links],
-            confidence_score=ai_response["confidence"],
-            response_type=ai_response["type"],
-            metadata={
-                "conversation_turns": len(conversation_history),
-                "evidence_sources": len(contexts),
-                "processing_time_ms": ai_response.get("processing_time", 0)
-            }
-        )
-        
-        logger.info("Enhanced conversation response generated",
-                   conversation_id=conversation["id"],
-                   response_type=ai_response["type"],
-                   confidence=ai_response["confidence"])
-        
-        return response
-        
-    except Exception as e:
-        logger.error("Enhanced conversation failed", error=str(e))
-        raise HTTPException(status_code=500, detail="Conversation processing failed")
+@app.get("/healthz", response_model=HealthResponse)
+async def healthz():
+    """Kubernetes liveness probe endpoint - checks if service is alive."""
+    return HealthResponse(status="ok")
 
-@app.get("/api/v1/proactive-insights", response_model=List[ConversationResponse])
-async def get_proactive_insights(
-    req: ProactiveInsightRequest = ProactiveInsightRequest(),
-    current_user: TokenData = Depends(get_current_user)
-):
-    """Generate proactive insights about system status and anomalies."""
-    logger.info("Proactive insights request", 
-                time_range=req.time_range,
-                user=current_user.sub)
-    
+@app.get("/readyz", response_model=HealthResponse)
+async def readyz(request: Request):
+    """
+    Kubernetes readiness probe endpoint.
+    Checks if service is ready to serve traffic by testing dependencies.
+    Returns 503 if any dependency is unhealthy.
+    """
     try:
-        # Analyze recent events for patterns and anomalies
-        insights = await analyze_system_patterns(
-            time_range=req.time_range,
-            severity_threshold=req.severity_threshold,
-            include_predictions=req.include_predictions
-        )
+        # Check Redis connection
+        redis_client = request.app.state.redis_client
+        if not redis_client:
+            logger.error("Redis client is not initialized")
+            raise Exception("Redis client is not initialized")
         
-        responses = []
-        for insight in insights:
-            # Create a conversation for each insight
-            conversation = await conversation_manager.create_conversation(
-                user_id=current_user.sub,
-                initial_context={"type": "proactive_insight", "insight_type": insight["type"]}
-            )
+        await redis_client.ping()
+        logger.debug("Redis ping successful")
+        
+        # Check Weaviate health  
+        weaviate_client = request.app.state.weaviate_client
+        if not weaviate_client:
+            logger.error("Weaviate client is not initialized")
+            raise Exception("Weaviate client is not initialized")
             
-            response = ConversationResponse(
-                conversation_id=conversation["id"],
-                response=insight["message"],
-                follow_up_questions=insight["suggested_actions"],
-                evidence=insight["evidence"],
-                clip_links=insight["clip_links"],
-                confidence_score=insight["confidence"],
-                response_type="proactive_insight",
-                metadata={
-                    "insight_type": insight["type"],
-                    "severity": insight["severity"],
-                    "timestamp": insight["timestamp"]
-                }
-            )
-            responses.append(response)
-          logger.info("Proactive insights generated", count=len(responses))
-        return responses
+        if not weaviate_client.is_ready():
+            logger.error("Weaviate is not ready")
+            raise Exception("Weaviate is not ready")
+        logger.debug("Weaviate is ready")
         
-    except Exception as e:
-        logger.error("Proactive insights failed", error=str(e))
-        raise HTTPException(status_code=500, detail="Insights generation failed")
-
-@app.get("/api/v1/conversation/{conversation_id}/history")
-async def get_conversation_history(
-    conversation_id: str,
-    limit: int = 50,
-    current_user: TokenData = Depends(get_current_user)
-):
-    """Get conversation history for a specific conversation."""
-    try:
-        messages = await conversation_manager.get_recent_messages(
-            conversation_id, 
-            limit=limit
-        )
-        return {"conversation_id": conversation_id, "messages": messages}
-    except Exception as e:
-        logger.error("Failed to get conversation history", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to retrieve conversation history")
-
-@app.delete("/api/v1/conversation/{conversation_id}")
-async def delete_conversation(
-    conversation_id: str,
-    current_user: TokenData = Depends(get_current_user)
-):
-    """Delete a conversation and its history."""
-    try:
-        await conversation_manager.delete_conversation(conversation_id)
-        return {"message": "Conversation deleted successfully"}
-    except Exception as e:
-        logger.error("Failed to delete conversation", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to delete conversation")
-
-async def enhanced_semantic_search(query: str, conversation_history: List[Dict], limit: int = 5):
-    """Enhanced semantic search that considers conversation context."""
-    try:
-        # Extract context from conversation history
-        context_queries = []
-        for msg in conversation_history[-3:]:  # Last 3 messages for context
-            if msg["role"] == "user":
-                context_queries.append(msg["content"])
-        
-        # Combine current query with context
-        enhanced_query = query
-        if context_queries:
-            context_str = " ".join(context_queries[-2:])  # Last 2 user queries
-            enhanced_query = f"{context_str} {query}"
-        
-        # Perform semantic search with enhanced query
-        results = semantic_search(enhanced_query, limit=limit)
-        
-        # Add relevance scoring based on conversation context
-        for result in results:
-            result["conversation_relevance"] = calculate_conversation_relevance(
-                result, conversation_history
-            )
-        
-        # Sort by relevance
-        results.sort(key=lambda x: x.get("conversation_relevance", 0), reverse=True)
-        
-        return results
-        
-    except Exception as e:
-        logger.error("Enhanced semantic search failed", error=str(e))
-        # Fallback to basic search
-        return semantic_search(query, limit=limit)
-
-def calculate_conversation_relevance(result: Dict, conversation_history: List[Dict]) -> float:
-    """Calculate how relevant a search result is to the conversation context."""
-    relevance_score = 0.5  # Base relevance
-    
-    # Check if camera_id mentioned in conversation
-    for msg in conversation_history:
-        if result.get("camera_id", "") in msg.get("content", ""):
-            relevance_score += 0.2
+        # Test OpenAI client (lightweight check - just verify client exists)
+        # We don't make actual API calls in readiness check to avoid cost/rate limits
+        openai_client = request.app.state.openai_client
+        if not openai_client:
+            logger.error("OpenAI client is not initialized")
+            raise Exception("OpenAI client is not initialized")
             
-        # Check for temporal references
-        if any(time_word in msg.get("content", "").lower() 
-               for time_word in ["today", "yesterday", "recent", "last"]):
-            # Prefer more recent events
-            event_time = datetime.fromisoformat(result.get("timestamp", "").replace("Z", "+00:00"))
-            hours_ago = (datetime.now() - event_time.replace(tzinfo=None)).total_seconds() / 3600
-            if hours_ago < 24:
-                relevance_score += 0.3
-    
-    return min(relevance_score, 1.0)
-
-async def analyze_system_patterns(
-    time_range: str = "24h", 
-    severity_threshold: str = "medium",
-    include_predictions: bool = True
-) -> List[Dict]:
-    """Analyze system for patterns and generate proactive insights."""
-    insights = []
-    
-    try:
-        # Convert time range to hours
-        hours = {"1h": 1, "24h": 24, "7d": 168, "30d": 720}.get(time_range, 24)
+        if not hasattr(openai_client, 'api_key') or not openai_client.api_key:
+            logger.error("OpenAI client is not properly configured")
+            raise Exception("OpenAI client is not properly configured")
+        logger.debug("OpenAI client is configured")
         
-        # Query recent events for pattern analysis
-        recent_events = semantic_search(
-            f"events last {hours} hours", 
-            limit=100
-        )
+        # Test ConversationManager
+        conversation_manager = request.app.state.conversation_manager
+        if not conversation_manager:
+            logger.error("ConversationManager is not initialized")
+            raise Exception("ConversationManager is not initialized")
+        logger.debug("ConversationManager is initialized")
         
-        # Pattern 1: Unusual activity spikes
-        activity_insight = analyze_activity_patterns(recent_events, time_range)
-        if activity_insight:
-            insights.append(activity_insight)
-            
-        # Pattern 2: Camera performance issues
-        camera_insight = analyze_camera_performance(recent_events)
-        if camera_insight:
-            insights.append(camera_insight)
-            
-        # Pattern 3: Security anomalies
-        security_insight = analyze_security_anomalies(recent_events, severity_threshold)
-        if security_insight:
-            insights.append(security_insight)
-            
-        # Pattern 4: Predictive insights (if enabled)
-        if include_predictions:
-            prediction_insight = generate_predictions(recent_events, time_range)
-            if prediction_insight:
-                insights.append(prediction_insight)
-                
+        return HealthResponse(status="ready")
+        
     except Exception as e:
-        logger.error("Pattern analysis failed", error=str(e))
-        
-    return insights
+        logger.error(f"Readiness check failed: {e}")
+        # Return 503 Service Unavailable for readiness failures
+        raise HTTPException(status_code=503, detail="Service not ready")
 
-def analyze_activity_patterns(events: List[Dict], time_range: str) -> Optional[Dict]:
-    """Analyze for unusual activity patterns."""
-    if len(events) < 10:
-        return None
-        
-    # Simple pattern detection - could be enhanced with ML
-    current_hour_events = len([e for e in events if "recent" in str(e)])
-    
-    if current_hour_events > 50:  # Threshold for unusual activity
-        return {
-            "type": "activity_spike",
-            "message": f"Unusual activity detected: {current_hour_events} events in the last hour, significantly above normal baseline.",
-            "suggested_actions": [
-                "Review camera feeds for the affected areas",
-                "Check for environmental factors causing false triggers",
-                "Consider adjusting detection sensitivity"
-            ],
-            "evidence": events[:10],
-            "clip_links": [get_clip_url(e["event_id"]) for e in events[:5]],
-            "confidence": 0.8,
-            "severity": "medium",
-            "timestamp": datetime.now().isoformat()
-        }
-    
-    return None
+# Startup and shutdown events
+@app.on_event("startup")
+async def startup():
+    await startup_event()
 
-def analyze_camera_performance(events: List[Dict]) -> Optional[Dict]:
-    """Analyze camera performance issues."""
-    camera_counts = {}
-    for event in events:
-        camera_id = event.get("camera_id", "unknown")
-        camera_counts[camera_id] = camera_counts.get(camera_id, 0) + 1
-    
-    # Find cameras with no activity (potential issues)
-    inactive_cameras = [cam for cam, count in camera_counts.items() if count == 0]
-    
-    if inactive_cameras:
-        return {
-            "type": "camera_performance",
-            "message": f"Cameras may need attention: {', '.join(inactive_cameras[:3])} showing no activity in recent period.",
-            "suggested_actions": [
-                "Check camera connectivity and power",
-                "Verify camera positioning and field of view",
-                "Review camera configuration settings"
-            ],
-            "evidence": [],
-            "clip_links": [],
-            "confidence": 0.7,
-            "severity": "low",
-            "timestamp": datetime.now().isoformat()
-        }
-    
-    return None
-
-def analyze_security_anomalies(events: List[Dict], severity_threshold: str) -> Optional[Dict]:
-    """Analyze for security-related anomalies."""
-    high_confidence_events = [
-        e for e in events 
-        if e.get("confidence", 0) > 0.9 and "person" in str(e.get("event_type", ""))
-    ]
-    
-    if len(high_confidence_events) > 5:
-        return {
-            "type": "security_anomaly",
-            "message": f"Multiple high-confidence person detections ({len(high_confidence_events)}) detected. Review for potential security concerns.",
-            "suggested_actions": [
-                "Review footage for unauthorized access attempts",
-                "Verify personnel schedules and authorized access",
-                "Consider increasing security patrols for affected areas"
-            ],
-            "evidence": high_confidence_events[:5],
-            "clip_links": [get_clip_url(e["event_id"]) for e in high_confidence_events[:3]],
-            "confidence": 0.9,
-            "severity": "high",
-            "timestamp": datetime.now().isoformat()
-        }
-    
-    return None
-
-def generate_predictions(events: List[Dict], time_range: str) -> Optional[Dict]:
-    """Generate predictive insights based on patterns."""
-    # Simple prediction based on event frequency trends
-    if len(events) > 20:
-        return {
-            "type": "prediction",
-            "message": "Based on current activity patterns, expect 15-20% increase in motion detection events during the next 4-hour period.",
-            "suggested_actions": [
-                "Consider pre-positioning security personnel",
-                "Ensure adequate storage space for increased recordings",
-                "Monitor system performance for potential resource constraints"
-            ],
-            "evidence": events[:5],
-            "clip_links": [],
-            "confidence": 0.6,
-            "severity": "info",
-            "timestamp": datetime.now().isoformat()
-        }
-    
-    return None
+@app.on_event("shutdown")
+async def shutdown():
+    await shutdown_event()

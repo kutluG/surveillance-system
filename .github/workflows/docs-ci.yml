@@ -1,0 +1,162 @@
+name: Documentation CI
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'docs/**'
+      - 'README.md'
+      - 'mkdocs.yml'
+      - '.github/workflows/docs-ci.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'docs/**'
+      - 'README.md'
+      - 'mkdocs.yml'
+      - '.github/workflows/docs-ci.yml'
+
+jobs:
+  # Validate markdown links
+  check-links:
+    runs-on: ubuntu-latest
+    name: Check Documentation Links
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install markdown-link-check
+        run: npm install -g markdown-link-check
+
+      - name: Check links in README
+        run: |
+          markdown-link-check README.md \
+            --config .github/markdown-link-check-config.json \
+            --quiet
+
+      - name: Check links in docs
+        run: |
+          find docs -name "*.md" -print0 | xargs -0 -I {} \
+          markdown-link-check {} \
+            --config .github/markdown-link-check-config.json \
+            --quiet
+
+      - name: Report results
+        if: failure()
+        run: |
+          echo "❌ Broken links found in documentation"
+          echo "Please fix the broken links before merging"
+          exit 1
+
+  # Build documentation site
+  build-docs:
+    runs-on: ubuntu-latest
+    name: Build Documentation Site
+    needs: check-links
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install mkdocs-material
+          pip install mkdocs-jupyter
+          pip install mkdocs-mermaid2-plugin
+          pip install mkdocs-git-revision-date-localized-plugin
+          pip install mkdocs-minify-plugin
+
+      - name: Build documentation
+        run: mkdocs build --strict
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: documentation-site
+          path: site/
+
+  # Deploy to GitHub Pages (only on main branch)
+  deploy-docs:
+    runs-on: ubuntu-latest
+    name: Deploy Documentation
+    needs: build-docs
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install mkdocs-material
+          pip install mkdocs-jupyter
+          pip install mkdocs-mermaid2-plugin
+          pip install mkdocs-git-revision-date-localized-plugin
+          pip install mkdocs-minify-plugin
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v3
+
+      - name: Build with MkDocs
+        run: mkdocs build --strict
+
+      - name: Upload to GitHub Pages
+        uses: actions/upload-pages-artifact@v2
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v2
+
+  # Lint documentation
+  docs-lint:
+    runs-on: ubuntu-latest
+    name: Lint Documentation
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install markdownlint
+        run: npm install -g markdownlint-cli
+
+      - name: Lint markdown files
+        run: |
+          markdownlint docs/**/*.md README.md \
+            --ignore node_modules || echo "Markdown linting complete"
+
+      - name: Check for TODO/FIXME items
+        run: |
+          echo "Checking for TODO/FIXME items..."
+          grep -r "TODO\|FIXME\|XXX" docs/ README.md || echo "No TODO items found"

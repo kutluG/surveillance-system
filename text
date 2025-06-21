@@ -1,0 +1,9 @@
+Name         Version ID                  Fix Versions
+------------ ------- ------------------- ------------
+cryptography 42.0.8  GHSA-h4gh-qq45-vh27 43.0.1
+cryptography 42.0.8  GHSA-79v4-65xg-pq4g 44.0.1
+pip          23.2.1  PYSEC-2023-228      23.3
+requests     2.32.3  GHSA-9hjg-9r4m-mvj7 2.32.4
+Name   Skip Reason
+------ ---------------------------------------------------------------------
+shared Dependency not found on PyPI and could not be audited: shared (0.1.0)

@@ -15,10 +15,12 @@ Features:
 import cv2
 import numpy as np
 import hashlib
+import os
 from typing import List, Tuple, Optional, Dict, Any
 from enum import Enum
 import logging
 from dataclasses import dataclass
+from .config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -60,9 +62,36 @@ class AnonymizationConfig:
     hash_embeddings_only: bool = True
 
 class FaceAnonymizer:
-    """Main face anonymization class"""
+    """
+    Main face anonymization class for privacy-preserving video processing.
+    
+    This class provides comprehensive face anonymization capabilities for edge devices,
+    supporting multiple anonymization methods and privacy levels. It implements a
+    robust face detection pipeline with fallback mechanisms and configurable
+    privacy settings to ensure compliance with data protection regulations.
+    
+    Key Features:
+        - Multiple detection algorithms (Haar Cascade, DNN) with automatic fallback
+        - Configurable anonymization methods (blur, pixelate, black box, emoji)
+        - Privacy-preserving face hashing for identification without raw face storage
+        - Comprehensive statistics and monitoring capabilities
+        - Edge-optimized performance with minimal resource usage
+    
+    Attributes:
+        config (AnonymizationConfig): Configuration object controlling behavior
+        face_cascade: Haar cascade classifier for lightweight face detection
+        dnn_net: DNN-based face detection model for higher accuracy
+    """
     
     def __init__(self, config: AnonymizationConfig = None):
+        """
+        Initialize the face anonymizer with configuration.
+        
+        Sets up the face anonymization system with the specified configuration,
+        initializing detection models and logging the configuration for monitoring.
+        
+        :param config: Anonymization configuration object, uses default if None
+        """
         self.config = config or AnonymizationConfig()
         self.face_cascade = None
         self.dnn_net = None
@@ -72,54 +101,108 @@ class FaceAnonymizer:
                    f"privacy level: {self.config.privacy_level.value}")
     
     def _initialize_detectors(self):
-        """Initialize face detection models"""
+        """
+        Initialize face detection models with fallback strategy.
+        
+        Sets up both primary and backup face detection methods:
+        1. Primary: OpenCV Haar Cascade (lightweight, good for edge devices)
+        2. Backup: DNN-based face detection (more accurate but computationally heavier)
+        
+        The initialization follows a defensive programming approach, gracefully handling
+        missing model files and configuration issues while ensuring at least one detector
+        is available for face detection operations.
+        
+        :raises Exception: Logs errors but continues execution if detectors fail to load
+        """
         try:
-            # Primary: OpenCV Haar Cascade (lightweight for edge)
-            self.face_cascade = cv2.CascadeClassifier(
-                cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-            )
-            
-            # Backup: DNN-based face detection (more accurate but heavier)
+            # Initialize primary detector: OpenCV Haar Cascade
+            # Haar cascades are lightweight and fast, ideal for edge devices
+            haar_path = settings.haar_cascade_path
+            if os.path.exists(haar_path):
+                self.face_cascade = cv2.CascadeClassifier(haar_path)
+                logger.info(f"Loaded Haar cascade from: {haar_path}")
+            else:
+                # Fallback to OpenCV built-in cascade if configured path not found
+                # This ensures the service remains functional even with configuration issues
+                self.face_cascade = cv2.CascadeClassifier(
+                    cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+                )
+                logger.warning(f"Using built-in Haar cascade, configured path not found: {haar_path}")
+              # Initialize backup detector: DNN-based face detection
+            # DNN models provide higher accuracy but require more computational resources
             try:
-                # Download these models if not present:
-                # https://github.com/opencv/opencv/tree/master/samples/dnn/face_detector
-                prototxt_path = "models/deploy.prototxt"
-                weights_path = "models/res10_300x300_ssd_iter_140000.caffemodel"
+                prototxt_path = settings.dnn_prototxt_path
+                weights_path = settings.dnn_model_path
                 
-                self.dnn_net = cv2.dnn.readNetFromCaffe(prototxt_path, weights_path)
-                logger.info("DNN face detector loaded successfully")
+                if os.path.exists(prototxt_path) and os.path.exists(weights_path):
+                    self.dnn_net = cv2.dnn.readNetFromTensorflow(weights_path, prototxt_path)
+                    logger.info(f"DNN face detector loaded from: {prototxt_path}, {weights_path}")
+                else:
+                    logger.warning(f"DNN model files not found: {prototxt_path}, {weights_path}")
+                    self.dnn_net = None
+                    
             except Exception as e:
                 logger.warning(f"DNN face detector not available: {e}")
+                self.dnn_net = None
                 
         except Exception as e:
             logger.error(f"Failed to initialize face detectors: {e}")
             self.face_cascade = None
     
     def detect_faces(self, frame: np.ndarray) -> List[FaceDetection]:
-        """Detect faces in the frame using available detectors"""
+        """
+        Detect faces in the frame using available detectors.
+        
+        Implements a hierarchical detection strategy, attempting DNN-based detection
+        first for higher accuracy, then falling back to Haar cascade if needed.
+        This approach balances accuracy with performance based on available resources.
+        
+        :param frame: Input video frame as numpy array in BGR color space
+        :return: List of FaceDetection objects with bounding boxes and confidence scores
+        :raises ValueError: If frame is empty or has invalid format
+        """
+        # Return empty list if anonymization is disabled
         if not self.config.enabled:
             return []
         
+        # Validate input frame
+        if frame is None or frame.size == 0:
+            raise ValueError("Input frame is empty or invalid")
+        
         faces = []
         
-        # Try DNN detector first (more accurate)
+        # Primary detection: Try DNN detector first (more accurate)
         if self.dnn_net is not None:
             faces = self._detect_faces_dnn(frame)
         
-        # Fallback to Haar cascade if DNN fails or unavailable
+        # Fallback detection: Use Haar cascade if DNN fails or unavailable
         if not faces and self.face_cascade is not None:
             faces = self._detect_faces_haar(frame)
         
         return faces
     
     def _detect_faces_haar(self, frame: np.ndarray) -> List[FaceDetection]:
-        """Detect faces using Haar Cascade"""
+        """
+        Detect faces using Haar Cascade classifier.
+        
+        Haar cascades are lightweight and fast, making them ideal for edge devices
+        with limited computational resources. They work well for frontal faces
+        under good lighting conditions.
+        
+        :param frame: Input BGR frame for face detection
+        :return: List of detected faces with estimated confidence
+        """
+        # Convert to grayscale as Haar cascades work on single-channel images
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
+        # Run cascade detection with optimized parameters
+        # scaleFactor: How much the image size is reduced at each scale
+        # minNeighbors: How many neighbors each face candidate should retain
+        # minSize: Minimum possible face size, smaller faces are ignored
         face_rects = self.face_cascade.detectMultiScale(
             gray,
-            scaleFactor=1.1,
-            minNeighbors=5,
+            scaleFactor=1.1,        # 10% size reduction per scale level
+            minNeighbors=5,         # Good balance between false positives and missed detections
             minSize=(self.config.min_face_size, self.config.min_face_size)
         )
         
@@ -127,33 +210,54 @@ class FaceAnonymizer:
         for (x, y, w, h) in face_rects:
             faces.append(FaceDetection(
                 x=x, y=y, width=w, height=h,
-                confidence=0.8  # Haar doesn't provide confidence, use default
+                confidence=0.8  # Haar cascades don't provide confidence, use reasonable default
             ))
         
         return faces
     
     def _detect_faces_dnn(self, frame: np.ndarray) -> List[FaceDetection]:
-        """Detect faces using DNN model"""
+        """
+        Detect faces using DNN (Deep Neural Network) model.
+        
+        DNN-based detection provides higher accuracy and better handling of
+        challenging conditions (lighting, angles, occlusions) compared to
+        traditional methods, at the cost of increased computational requirements.
+        
+        :param frame: Input BGR frame for face detection
+        :return: List of detected faces with confidence scores
+        """
+        # Get frame dimensions for coordinate normalization
         (h, w) = frame.shape[:2]
+        
+        # Create blob from image for DNN input
+        # Resize to 300x300 (model's expected input size)
+        # Subtract mean values to normalize pixel values
         blob = cv2.dnn.blobFromImage(
             cv2.resize(frame, (300, 300)), 1.0,
             (300, 300), (104.0, 177.0, 123.0)
         )
         
+        # Run forward pass through the network
         self.dnn_net.setInput(blob)
         detections = self.dnn_net.forward()
         
         faces = []
+        
+        # Process each detection
         for i in range(0, detections.shape[2]):
             confidence = detections[0, 0, i, 2]
             
+            # Filter detections by confidence threshold
             if confidence > self.config.detection_confidence:
+                # Extract bounding box coordinates (normalized [0,1])
                 box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
                 (x, y, x1, y1) = box.astype("int")
                 
+                # Convert to width/height format
                 width = x1 - x
                 height = y1 - y
                 
+                # Validate face size meets minimum requirements
                 if width >= self.config.min_face_size and height >= self.config.min_face_size:
                     faces.append(FaceDetection(
                         x=x, y=y, width=width, height=height,

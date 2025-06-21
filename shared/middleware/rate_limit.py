@@ -117,7 +117,8 @@ def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded)
     Custom handler for rate limit exceeded exceptions.
     Returns HTTP 429 with JSON: { "detail": "Rate limit exceeded. Try again in <retry_after>s." }
     """
-    retry_after = int(exc.retry_after) if exc.retry_after else 60
+    # slowapi RateLimitExceeded doesn't have retry_after, so we calculate it
+    retry_after = 60  # Default to 60 seconds
     
     logger.warning(
         f"Rate limit exceeded for {get_identifier(request)} on {request.url.path}",

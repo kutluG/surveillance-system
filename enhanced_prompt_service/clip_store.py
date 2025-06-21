@@ -1,15 +1,19 @@
 """
 Enhanced clip store client for video URL generation with advanced features.
 """
-import os
 import requests
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 
+from shared.config import get_service_config
+
+# Get service configuration
+config = get_service_config("enhanced_prompt_service")
+
 # Configuration
-VMS_SERVICE_URL = os.getenv("VMS_SERVICE_URL", "http://vms-service:8000")
-CLIP_BASE_URL = os.getenv("CLIP_BASE_URL", "https://cdn.example.com/clips")
-DEFAULT_EXPIRY_MINUTES = int(os.getenv("DEFAULT_CLIP_EXPIRY_MINUTES", "60"))
+VMS_SERVICE_URL = config["vms_service_url"]
+CLIP_BASE_URL = config["clip_base_url"]
+DEFAULT_EXPIRY_MINUTES = config["default_clip_expiry_minutes"]
 
 def get_clip_url(
     event_id: str, 
@@ -310,9 +314,8 @@ def _get_thumbnail_url(event_id: str) -> Optional[str]:
     
     except Exception:
         pass
-    
-    # Fallback to constructed URL
-    thumbnail_base = os.getenv("THUMBNAIL_BASE_URL", f"{CLIP_BASE_URL}/thumbnails")
+      # Fallback to constructed URL
+    thumbnail_base = config["thumbnail_base_url"]
     return f"{thumbnail_base}/{event_id}.jpg"
 
 def batch_check_availability(event_ids: List[str]) -> Dict[str, bool]:

@@ -1,0 +1,47 @@
+# Development Environment Configuration
+environment: development
+
+service:
+  host: "0.0.0.0"
+  port: 8000
+  debug: true
+  reload: true
+  log_level: "DEBUG"
+  max_context_length: 15
+  similarity_threshold: 0.6
+  temporal_window_hours: 48
+
+weaviate:
+  url: "http://localhost:8080"
+  timeout: 60
+  max_retries: 5
+  batch_size: 50
+
+openai:
+  model: "gpt-3.5-turbo"
+  max_tokens: 1000
+  temperature: 0.8
+  timeout: 45
+
+embedding:
+  model_name: "sentence-transformers/all-MiniLM-L6-v2"
+  device: "auto"
+  batch_size: 16
+
+redis:
+  host: "localhost"
+  port: 6379
+  db: 0
+  timeout: 10
+  max_connections: 20
+
+security:
+  enable_cors: true
+  allowed_origins: ["*"]
+  rate_limit_per_minute: 100
+
+monitoring:
+  enable_metrics: true
+  metrics_port: 8001
+  enable_tracing: true
+  health_check_interval: 15

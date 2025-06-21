@@ -4,8 +4,16 @@ services:
     build:
       context: .
       dockerfile: edge_service/Dockerfile
+      args:
+        MODEL_BASE_URL: ${MODEL_BASE_URL:-https://raw.githubusercontent.com/opencv/opencv/master}
+        DNN_MODEL_URL: ${DNN_MODEL_URL:-https://github.com/opencv/opencv_3rdparty/raw/dnn_samples_face_detector_20170830/opencv_face_detector_uint8.pb}
     env_file:
       - .env
+    environment:
+      - EDGE_SERVICE_MODEL_BASE_URL=${MODEL_BASE_URL:-https://raw.githubusercontent.com/opencv/opencv/master}
+      - EDGE_SERVICE_ANONYMIZATION_ENABLED=${ANONYMIZATION_ENABLED:-true}
+      - EDGE_SERVICE_PRIVACY_LEVEL=${PRIVACY_LEVEL:-moderate}
+      - EDGE_SERVICE_ANONYMIZATION_METHOD=${ANONYMIZATION_METHOD:-blur}
     volumes:
       - ./models:/models
       - ./certs:/certs:ro

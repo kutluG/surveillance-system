@@ -1,0 +1,110 @@
+name: Agent Orchestrator Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'agent_orchestrator/**'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'agent_orchestrator/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.9, 3.10, 3.11]
+    
+    services:
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+      
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: test_surveillance
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      working-directory: ./agent_orchestrator
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-asyncio pytest-cov pytest-timeout pytest-xdist
+    
+    - name: Set up test environment
+      working-directory: ./agent_orchestrator
+      run: |
+        cp .env.example .env
+        # Override with test configuration
+        echo "DATABASE_URL=postgresql+asyncpg://test_user:test_password@localhost:5432/test_surveillance" >> .env
+        echo "REDIS_URL=redis://localhost:6379/0" >> .env
+        echo "LOG_LEVEL=INFO" >> .env
+        echo "DEBUG_MODE=true" >> .env
+    
+    - name: Run unit tests
+      working-directory: ./agent_orchestrator
+      run: |
+        python test_runner.py unit --verbose
+    
+    - name: Run integration tests
+      working-directory: ./agent_orchestrator
+      run: |
+        python test_runner.py integration --verbose
+    
+    - name: Run e2e tests
+      working-directory: ./agent_orchestrator
+      run: |
+        python test_runner.py e2e --verbose
+    
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./agent_orchestrator/coverage.xml
+        flags: agent-orchestrator
+        name: agent-orchestrator-coverage
+        fail_ci_if_error: false
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Run security scan
+      uses: pypa/gh-action-pip-audit@v1.0.8
+      with:
+        inputs: ./agent_orchestrator/requirements.txt
+        virtual-environment: ./agent_orchestrator/venv

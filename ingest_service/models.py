@@ -6,6 +6,7 @@ from sqlalchemy import Column, String, DateTime, JSON, Enum as PgEnum
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.ext.declarative import declarative_base
 from shared.models import EventType
+from shared.encrypted_fields import EncryptedJSONType, EncryptedType
 
 Base = declarative_base()
 
@@ -22,9 +23,11 @@ class Event(Base):
     timestamp = Column(DateTime, nullable=False)
     camera_id = Column(String, nullable=False)
     event_type = Column(PgEnum(EventType, name="event_type"), nullable=False)
-    detections = Column(JSON, nullable=True)
-    activity = Column(String, nullable=True)
-    event_metadata = Column(JSON, nullable=True)
+    
+    # Encrypted sensitive fields
+    detections = Column(EncryptedJSONType, nullable=True)  # Contains bounding box coordinates
+    activity = Column(EncryptedType, nullable=True)  # Activity descriptions may be sensitive
+    event_metadata = Column(EncryptedJSONType, nullable=True)  # May contain PII or sensitive data
     
     @classmethod
     def from_camera_event(cls, ev):

@@ -1,0 +1,174 @@
+# Docker Compose scaling configuration for Annotation Frontend Service
+# This snippet shows how to scale the annotation frontend to multiple replicas
+# for load balancing and high availability.
+
+version: '3.8'
+
+services:
+  # Annotation Frontend Service with scaling support
+  annotation_frontend:
+    image: myorg/annotation_frontend:latest
+    deploy:
+      replicas: 3  # Scale to 3 instances for load balancing
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    environment:
+      # Kafka Consumer Group Configuration
+      - KAFKA_GROUP_ID=annotation_group
+      - SERVICE_NAME=annotation-frontend
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - HARD_EXAMPLES_TOPIC=hard-examples
+      - LABELED_EXAMPLES_TOPIC=labeled-examples
+      
+      # Redis Configuration for shared state
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=0
+      
+      # Database Configuration
+      - DATABASE_URL=postgresql://user:password@postgres:5432/annotation_db
+      
+      # Security Configuration
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - CSRF_SECRET_KEY=${CSRF_SECRET_KEY}
+      
+      # Service Configuration
+      - HOST=0.0.0.0
+      - PORT=8000
+      - API_BASE_PATH=/api/v1
+      
+    ports:
+      - "8000-8002:8000"  # Map different host ports for each replica
+    
+    depends_on:
+      - redis
+      - kafka
+      - postgres
+    
+    networks:
+      - annotation_network
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Restart policy for resilience
+    restart: unless-stopped
+    
+    # Logging configuration
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Load Balancer (nginx) to distribute traffic across replicas
+  nginx_lb:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx_scaling.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - annotation_frontend
+    networks:
+      - annotation_network
+    restart: unless-stopped
+
+  # Redis for shared state and WebSocket coordination
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+    networks:
+      - annotation_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Kafka for message streaming
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    depends_on:
+      - zookeeper
+    networks:
+      - annotation_network
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    restart: unless-stopped
+
+  # Zookeeper for Kafka coordination
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - annotation_network
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+    restart: unless-stopped
+
+  # PostgreSQL database
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: annotation_db
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - annotation_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d annotation_db"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+networks:
+  annotation_network:
+    driver: bridge
+
+volumes:
+  redis_data:
+  kafka_data:
+  zookeeper_data:
+  postgres_data:
+
+# Commands for scaling:
+# 
+# Scale up to 5 replicas:
+# docker-compose up --scale annotation_frontend=5 -d
+# 
+# Scale down to 2 replicas:
+# docker-compose up --scale annotation_frontend=2 -d
+# 
+# View running replicas:
+# docker-compose ps
+# 
+# Monitor logs from all replicas:
+# docker-compose logs -f annotation_frontend

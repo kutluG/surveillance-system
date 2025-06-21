@@ -1,0 +1,46 @@
+# Testing Environment Configuration
+environment: testing
+
+service:
+  host: "0.0.0.0"
+  port: 8000
+  debug: false
+  reload: false
+  log_level: "INFO"
+  max_context_length: 5
+  similarity_threshold: 0.8
+  temporal_window_hours: 12
+
+weaviate:
+  url: "http://localhost:8080"
+  timeout: 30
+  max_retries: 3
+  batch_size: 10
+
+openai:
+  model: "gpt-3.5-turbo"
+  max_tokens: 500
+  temperature: 0.0
+  timeout: 30
+
+embedding:
+  model_name: "sentence-transformers/all-MiniLM-L6-v2"
+  device: "cpu"
+  batch_size: 8
+
+redis:
+  host: "localhost"
+  port: 6379
+  db: 1
+  timeout: 5
+  max_connections: 5
+
+security:
+  enable_cors: true
+  allowed_origins: ["http://localhost:3000", "http://localhost:8080"]
+  rate_limit_per_minute: 30
+
+monitoring:
+  enable_metrics: false
+  enable_tracing: false
+  health_check_interval: 60

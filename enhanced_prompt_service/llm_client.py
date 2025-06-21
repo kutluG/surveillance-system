@@ -5,13 +5,42 @@ import os
 import json
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
+from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
+from fastapi import HTTPException
 
-# Environment configuration
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4")
+from shared.config import get_service_config
+from shared.logging_config import get_logger
+
+logger = get_logger(__name__)
+
+# Get service configuration
+config = get_service_config("enhanced_prompt_service")
 
 # Initialize OpenAI client
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = OpenAI(api_key=config["openai_api_key"])
+
+@retry(
+    stop=stop_after_attempt(3), 
+    wait=wait_exponential(multiplier=1, max=10),
+    reraise=True
+)
+def call_openai_with_circuit_breaker(model: str, messages: List[Dict], **kwargs) -> Any:
+    """
+    Call OpenAI API with circuit breaker protection.
+    Retries up to 3 times with exponential backoff.
+    """
+    try:
+        logger.info("Calling OpenAI API", extra={"model": model, "attempt": "starting"})
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            **kwargs
+        )
+        logger.info("OpenAI API call successful", extra={"model": model})
+        return response
+    except Exception as e:
+        logger.error("OpenAI API call failed", extra={"model": model, "error": str(e)})
+        raise
 
 # System prompts for different capabilities
 CONVERSATIONAL_SYSTEM_PROMPT = """You are an intelligent surveillance system assistant with expertise in security analysis and anomaly detection. 
@@ -117,16 +146,16 @@ def generate_conversational_response(
 3. Considers the conversation history
 4. Provides actionable insights or recommendations
 5. Maintains a professional but approachable tone"""
-
+    
     messages = [
         {"role": "system", "content": CONVERSATIONAL_SYSTEM_PROMPT},
         {"role": "user", "content": user_content}
     ]
     
     try:
-        # Generate response using OpenAI
-        resp = client.chat.completions.create(
-            model=OPENAI_MODEL,
+        # Generate response using OpenAI with circuit breaker
+        resp = call_openai_with_circuit_breaker(
+            model=config["openai_model"],
             messages=messages,
             temperature=0.7,  # Slightly higher for more conversational responses
             max_tokens=1000,
@@ -152,14 +181,18 @@ def generate_conversational_response(
             "context_used": len(search_results),
             "has_conversation_context": len(conversation_history) > 0,
             "metadata": {
-                "model_used": OPENAI_MODEL,
+                "model_used": config["openai_model"],
                 "temperature": 0.7,
                 "tokens_used": resp.usage.total_tokens if resp.usage else None,
                 "system_insights": bool(system_context)
             }
         }
         
+    except RetryError as e:
+        logger.error("OpenAI API retry exhausted", extra={"error": str(e)})
+        raise HTTPException(status_code=503, detail="Upstream service unavailable")
     except Exception as e:
+        logger.error("Failed to generate conversational response", extra={"error": str(e)})
         raise ValueError(f"Failed to generate conversational response: {e}")
 
 def generate_follow_up_questions(
@@ -214,13 +247,12 @@ Focus on actionable, specific questions that build on the current context."""
 
     messages = [
         {"role": "system", "content": FOLLOW_UP_SYSTEM_PROMPT},
-        {"role": "user", "content": user_content}
-    ]
+        {"role": "user", "content": user_content}    ]
     
     try:
-        # Generate follow-up questions
-        resp = client.chat.completions.create(
-            model=OPENAI_MODEL,
+        # Generate follow-up questions with circuit breaker
+        resp = call_openai_with_circuit_breaker(
+            model=config["openai_model"],
             messages=messages,
             temperature=0.6,
             max_tokens=400,
@@ -232,15 +264,19 @@ Focus on actionable, specific questions that build on the current context."""
         try:
             questions = json.loads(questions_text)
             if isinstance(questions, list):
-                return [str(q) for q in questions[:5]]  # Limit to 5 questions
-            else:
+                return [str(q) for q in questions[:5]]  # Limit to 5 questions            else:
                 # Fallback: try to extract questions from text
                 return _extract_questions_from_text(questions_text)
         except json.JSONDecodeError:
             # Fallback: extract questions from text response
             return _extract_questions_from_text(questions_text)
             
+    except RetryError as e:
+        logger.error("OpenAI API retry exhausted for follow-up questions", extra={"error": str(e)})
+        # Return default follow-up questions on error
+        return _get_default_follow_ups(query, search_results)
     except Exception as e:
+        logger.error("Failed to generate follow-up questions", extra={"error": str(e)})
         # Return default follow-up questions on error
         return _get_default_follow_ups(query, search_results)
 
@@ -324,12 +360,11 @@ Keep insights brief, actionable, and focused on security implications."""
             "role": "system", 
             "content": "You are a security analyst providing proactive insights. Generate brief, actionable security insights based on surveillance patterns."
         },
-        {"role": "user", "content": user_content}
-    ]
+        {"role": "user", "content": user_content}    ]
     
     try:
-        resp = client.chat.completions.create(
-            model=OPENAI_MODEL,
+        resp = call_openai_with_circuit_breaker(
+            model=config["openai_model"],
             messages=messages,
             temperature=0.3,
             max_tokens=300,
@@ -343,8 +378,7 @@ Keep insights brief, actionable, and focused on security implications."""
         
         for line in lines:
             line = line.strip()
-            if line and not line.lower().startswith(('based on', 'here are', 'the following')):
-                # Clean up prefixes
+            if line and not line.lower().startswith(('based on', 'here are', 'the following')):                # Clean up prefixes
                 for prefix in ['1. ', '2. ', '3. ', '- ', '• ', '* ']:
                     if line.startswith(prefix):
                         line = line[len(prefix):].strip()
@@ -353,7 +387,16 @@ Keep insights brief, actionable, and focused on security implications."""
         
         return insights[:3]  # Limit to 3 insights
         
+    except RetryError as e:
+        logger.error("OpenAI API retry exhausted for proactive insights", extra={"error": str(e)})
+        # Return fallback insights
+        return [
+            "Monitor for unusual activity patterns",
+            "Review recent high-confidence detections",
+            "Consider updating security protocols"
+        ]
     except Exception as e:
+        logger.error("Failed to generate proactive insights", extra={"error": str(e)})
         # Return fallback insights
         return [
             "Monitor for unusual activity patterns",

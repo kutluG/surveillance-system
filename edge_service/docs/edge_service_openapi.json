@@ -1,0 +1,558 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Edge AI Service",
+    "version": "1.2.0",
+    "description": "Edge AI Service for real-time video processing with face anonymization.\n\n## Features\n- Real-time object detection and activity recognition\n- Privacy-compliant face anonymization\n- MQTT event publishing\n- Prometheus metrics export\n- Over-the-air model updates\n\n## Privacy Compliance\nAll faces are detected and anonymized **on-device** before any data processing or transmission.\n\n## Integration\nEvents are published to MQTT broker for downstream processing by the surveillance pipeline.",
+    "contact": {
+      "name": "Edge AI Service Support",
+      "email": "support@example.com"
+    },
+    "license": {
+      "name": "MIT License",
+      "url": "https://opensource.org/licenses/MIT"
+    },
+    "x-logo": {
+      "url": "https://fastapi.tiangolo.com/img/logo-margin/logo-fastapi-margin.png"
+    }
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Edge Service (Local)"
+    },
+    {
+      "url": "/api/v1",
+      "description": "Edge Service API v1"
+    }
+  ],
+  "paths": {
+    "/api/v1/capture": {
+      "post": {
+        "tags": ["core"],
+        "summary": "Schedule frame capture",
+        "description": "Trigger one frame capture with face anonymization and inference processing.\n\nThe complete processing pipeline:\n1. Capture frame from camera\n2. Apply face anonymization for privacy compliance\n3. Run object detection and activity recognition\n4. Publish results to MQTT broker\n\nThe processing happens in the background to ensure fast API response.",
+        "operationId": "capture_once_api_v1_capture_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": ["system"],
+        "summary": "Service health check",
+        "description": "Comprehensive health check endpoint providing system status.\n\nReturns information about:\n- Overall service status\n- Camera availability\n- Face anonymization status and configuration\n- Processing metrics and statistics",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "detail": {
+                      "type": "string",
+                      "example": "Camera not available"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/privacy/status": {
+      "get": {
+        "tags": ["privacy"],
+        "summary": "Get privacy status",
+        "description": "Get current face anonymization status and comprehensive statistics.\n\nProvides detailed information about:\n- Privacy configuration and status\n- Model loading status\n- Processing statistics and performance metrics\n- Compliance scores and metrics",
+        "operationId": "get_anonymization_status_api_v1_privacy_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnonymizationStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/privacy/configure": {
+      "post": {
+        "tags": ["privacy"],
+        "summary": "Configure privacy settings",
+        "description": "Update face anonymization configuration at runtime.\n\nAllows dynamic configuration of:\n- Privacy level (strict, moderate, minimal)\n- Anonymization method (blur, pixelate, black_box, emoji)\n- Enable/disable anonymization\n- Method-specific parameters",
+        "operationId": "configure_anonymization_api_v1_privacy_configure_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnonymizationConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "config": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/privacy/test": {
+      "post": {
+        "tags": ["privacy"],
+        "summary": "Test face anonymization",
+        "description": "Test face anonymization with current camera frame.\nReturns anonymization statistics without publishing the event.",
+        "operationId": "test_anonymization_api_v1_privacy_test_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "test_results": {
+                      "type": "object"
+                    },
+                    "frame_processed": {
+                      "type": "boolean"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "500": {
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/ota": {
+      "post": {
+        "tags": ["management"],
+        "summary": "Over-the-air model update",
+        "description": "Download new model files and reload the inference engine.\n\nThis endpoint allows remote model updates without service restart.",
+        "operationId": "ota_update_api_v1_ota_post",
+        "parameters": [
+          {
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Url"
+            },
+            "name": "model_url",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "next_steps": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/models/info": {
+      "get": {
+        "tags": ["management"],
+        "summary": "Get model information",
+        "description": "Get detailed information about loaded AI models.\n\nReturns information about:\n- Object detection models\n- Activity recognition models\n- Face detection models\n- Performance metrics and checksums",
+        "operationId": "get_model_info_api_v1_models_info_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ModelInfo"
+                  },
+                  "type": "array",
+                  "title": "Response Get Model Info Api V1 Models Info Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": ["system"],
+        "summary": "Prometheus metrics",
+        "description": "Export Prometheus metrics for monitoring and alerting.\n\nIncludes metrics for:\n- Frame processing statistics\n- Face anonymization performance\n- Privacy compliance scores\n- System health indicators",
+        "operationId": "metrics_metrics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CaptureResponse": {
+        "type": "object",
+        "title": "CaptureResponse",
+        "description": "Response model for capture endpoint",
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "Frame capture scheduled successfully"
+          },
+          "timestamp": {
+            "type": "number",
+            "title": "Timestamp"
+          }
+        },
+        "required": ["status", "timestamp"]
+      },
+      "HealthResponse": {
+        "type": "object",
+        "title": "HealthResponse",
+        "description": "Health check response model",
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "timestamp": {
+            "type": "number",
+            "title": "Timestamp"
+          },
+          "camera_available": {
+            "type": "boolean",
+            "title": "Camera Available"
+          },
+          "anonymization": {
+            "type": "object",
+            "title": "Anonymization",
+            "properties": {
+              "status": {
+                "type": "string"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "privacy_level": {
+                "type": "string"
+              },
+              "method": {
+                "type": "string"
+              }
+            }
+          },
+          "metrics": {
+            "type": "object",
+            "title": "Metrics",
+            "properties": {
+              "frames_processed": {
+                "type": "integer"
+              },
+              "faces_anonymized": {
+                "type": "integer"
+              },
+              "failures": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "required": ["status", "timestamp", "camera_available", "anonymization", "metrics"]
+      },
+      "AnonymizationConfigRequest": {
+        "type": "object",
+        "title": "AnonymizationConfigRequest",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          },
+          "method": {
+            "type": "string",
+            "title": "Method",
+            "default": "blur",
+            "enum": ["blur", "pixelate", "black_box", "emoji"]
+          },
+          "privacy_level": {
+            "type": "string",
+            "title": "Privacy Level",
+            "default": "strict",
+            "enum": ["strict", "moderate", "minimal"]
+          },
+          "blur_factor": {
+            "type": "integer",
+            "title": "Blur Factor",
+            "default": 15
+          },
+          "pixelate_factor": {
+            "type": "integer",
+            "title": "Pixelate Factor",
+            "default": 10
+          }
+        }
+      },
+      "AnonymizationStatusResponse": {
+        "type": "object",
+        "title": "AnonymizationStatusResponse",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "privacy_level": {
+            "type": "string",
+            "title": "Privacy Level"
+          },
+          "faces_detected_today": {
+            "type": "integer",
+            "title": "Faces Detected Today"
+          },
+          "total_frames_processed": {
+            "type": "integer",
+            "title": "Total Frames Processed"
+          },
+          "models_loaded": {
+            "type": "object",
+            "title": "Models Loaded",
+            "properties": {
+              "haar_cascade": {
+                "type": "boolean"
+              },
+              "dnn_model": {
+                "type": "boolean"
+              }
+            }
+          },
+          "statistics": {
+            "type": "object",
+            "title": "Statistics"
+          }
+        },
+        "required": ["enabled", "method", "privacy_level", "faces_detected_today", "total_frames_processed", "models_loaded", "statistics"]
+      },
+      "ModelInfo": {
+        "type": "object",
+        "title": "ModelInfo",
+        "description": "Model information response",
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "size_mb": {
+            "type": "number",
+            "title": "Size Mb"
+          },
+          "checksum": {
+            "type": "string",
+            "title": "Checksum"
+          },
+          "last_updated": {
+            "type": "string",
+            "title": "Last Updated"
+          },
+          "performance_metrics": {
+            "type": "object",
+            "title": "Performance Metrics",
+            "additionalProperties": {
+              "type": "number"
+            }
+          }
+        },
+        "required": ["name", "version", "size_mb", "checksum", "last_updated", "performance_metrics"]
+      },
+      "HTTPValidationError": {
+        "type": "object",
+        "title": "HTTPValidationError",
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        }
+      },
+      "ValidationError": {
+        "type": "object",
+        "title": "ValidationError",
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "required": ["loc", "msg", "type"]
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "core",
+      "description": "Core inference and capture operations"
+    },
+    {
+      "name": "privacy",
+      "description": "Face anonymization and privacy controls"
+    },
+    {
+      "name": "system",
+      "description": "Health checks and system status"
+    },
+    {
+      "name": "management",
+      "description": "OTA updates and configuration"
+    }
+  ]
+}

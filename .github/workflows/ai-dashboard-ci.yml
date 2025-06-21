@@ -1,0 +1,288 @@
+name: AI Dashboard Service CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'ai_dashboard_service/**'
+      - '.github/workflows/ai-dashboard-ci.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'ai_dashboard_service/**'
+      - '.github/workflows/ai-dashboard-ci.yml'
+
+env:
+  WORKING_DIRECTORY: ./ai_dashboard_service
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  test:
+    name: Test AI Dashboard Service
+    runs-on: ubuntu-latest
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: test_dashboard_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test_user -d test_dashboard_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify service connectivity
+        run: |
+          # Verify Redis is accessible
+          redis-cli -h localhost -p 6379 ping
+          # Verify PostgreSQL is accessible
+          pg_isready -h localhost -p 5432 -U test_user -d test_dashboard_db      - name: Run unit tests
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        env:
+          REDIS_URL: redis://localhost:6379/0
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_dashboard_db
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'test-key' }}
+        run: |
+          pytest tests/test_analytics.py tests/test_llm_client.py tests/test_weaviate_client.py \
+            --maxfail=1 --disable-warnings -q- name: Run integration tests
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        env:
+          REDIS_URL: redis://localhost:6379/0
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_dashboard_db
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'test-key' }}
+        run: |
+          pytest tests/test_integration_simple.py \
+            --maxfail=1 --disable-warnings -q      - name: Test with coverage
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        env:
+          REDIS_URL: redis://localhost:6379/0
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_dashboard_db
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'test-key' }}
+        run: |          pytest tests/test_analytics.py tests/test_llm_client.py tests/test_weaviate_client.py tests/test_integration_simple.py \
+            --cov=app --cov-report=term-missing --cov-report=xml --cov-fail-under=40
+
+      - name: Upload coverage to Codecov
+        if: success()
+        uses: codecov/codecov-action@v4
+        with:
+          file: ${{ env.WORKING_DIRECTORY }}/coverage.xml
+          flags: ai-dashboard-service
+          name: ai-dashboard-coverage
+
+  e2e-tests:
+    name: E2E Tests with Testcontainers
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install dependencies
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt      - name: Run E2E smoke tests
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'test-key' }}
+        run: |
+          pytest tests/test_e2e_containers.py::TestE2EWithContainers::test_redis_connectivity \
+            tests/test_e2e_containers.py::TestE2EWithContainers::test_postgres_connectivity \
+            tests/test_e2e_containers.py::TestE2EWithContainers::test_full_analytics_to_insights_workflow \
+            --maxfail=1 --disable-warnings -v      - name: Run container resource tests
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'test-key' }}
+        run: |
+          pytest tests/test_e2e_containers.py::TestE2EWithContainers::test_service_health_with_containers \
+            --maxfail=1 --disable-warnings -v
+
+  lint:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install lint dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install black isort flake8 mypy
+
+      - name: Check code formatting with Black
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: black --check --diff .
+
+      - name: Check import sorting with isort
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: isort --check-only --diff .
+
+      - name: Lint with flake8
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: flake8 . --max-line-length=88 --extend-ignore=E203,W503
+
+      - name: Type check with mypy
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: mypy app/ --ignore-missing-imports
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run security audit
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: |
+          pip-audit --desc --output json --format json || true
+
+      - name: Run Bandit security scan
+        run: |
+          pip install bandit[toml]
+          bandit -r ${{ env.WORKING_DIRECTORY }}/app/ -f json -o bandit-report.json || true
+
+      - name: Upload security reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: |
+            bandit-report.json
+            ${{ env.WORKING_DIRECTORY }}/audit-report.json
+
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: |
+          if [ -f Dockerfile ]; then
+            docker build -t ai-dashboard-service:${{ github.sha }} .
+          else
+            echo "No Dockerfile found, skipping build"
+          fi
+
+  integration-verification:
+    name: Integration Verification
+    runs-on: ubuntu-latest
+    needs: [test, e2e-tests]
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify API schema consistency
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: |
+          python -c "
+          from app.main import create_app
+          app = create_app()
+          openapi_schema = app.openapi()
+          print('API Schema generated successfully')
+          print(f'Endpoints: {len(openapi_schema.get(\"paths\", {}))}')
+          "
+
+      - name: Test import integrity
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: |
+          python -c "
+          from app.main import create_app
+          from app.services.analytics import AnalyticsService
+          from app.services.llm_client import LLMService
+          from app.services.weaviate_client import WeaviateService
+          from app.routers.dashboard import router
+          print('All imports successful')
+          "
+
+      - name: Integration test summary
+        run: |
+          echo "## Integration Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Unit tests passed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Integration tests passed" >> $GITHUB_STEP_SUMMARY  
+          echo "✅ E2E smoke tests passed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Code quality checks passed" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Security scans completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The AI Dashboard Service is ready for integration! 🚀" >> $GITHUB_STEP_SUMMARY

@@ -16,22 +16,34 @@ jobs:
       - uses: actions/checkout@v3
       - name: Set up Python
         uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python-version }}
+        with:          python-version: ${{ matrix.python-version }}
+      - name: Validate pinned dependencies
+        run: python scripts/validate_requirements.py
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements_edge_service.txt || true
+      - name: Audit dependencies for vulnerabilities
+        run: python scripts/audit_dependencies.py
       - name: Run linters
         run: |
           black --check .
           isort --check-only .
           flake8 .
-          mypy .
-      - name: Run tests
+          mypy .      - name: Run tests
         run: |
           pytest -q --maxfail=1
+          
+      - name: Run AI Dashboard Service tests
+        working-directory: ./ai_dashboard_service
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+            pytest tests/ --cov=app --cov-fail-under=80 --maxfail=1 --disable-warnings -q
+          else
+            echo "AI Dashboard Service requirements.txt not found, skipping tests"
+          fi
 
   js-lint:
     runs-on: ubuntu-latest
@@ -50,3 +62,439 @@ jobs:
         run: |
           cd mobile-app
           npx eslint "src/**/*.{js,jsx,ts,tsx}" --max-warnings=0
+
+  markdown-link-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        - name: Check markdown links in Enhanced Prompt Service docs
+        uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          config-file: '.github/markdown-link-check-config.json'
+          folder-path: 'enhanced_prompt_service/docs'
+          max-depth: 2
+          
+      - name: Check markdown links in AI Dashboard Service docs
+        uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          config-file: '.github/markdown-link-check-config.json'
+          folder-path: 'ai_dashboard_service/docs'
+          max-depth: 2
+            - name: Check main README files
+        uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          config-file: '.github/markdown-link-check-config.json'
+          file-path: |
+            README.md
+            enhanced_prompt_service/README.md
+            ai_dashboard_service/README.md
+            
+      - name: Check all documentation files
+        uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          config-file: '.github/markdown-link-check-config.json'
+          folder-path: 'docs'
+          max-depth: 3
+          
+  annotation-e2e-tests:
+    runs-on: ubuntu-latest
+    needs: python-lint-and-test
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: events_db
+          POSTGRES_USER: surveillance_user
+          POSTGRES_PASSWORD: surveillance_pass_5487
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+      
+      zookeeper:
+        image: confluentinc/cp-zookeeper:7.4.0
+        env:
+          ZOOKEEPER_CLIENT_PORT: 2181
+          ZOOKEEPER_TICK_TIME: 2000
+        ports:
+          - 2181:2181
+      
+      kafka:
+        image: confluentinc/cp-kafka:7.4.0
+        env:
+          KAFKA_BROKER_ID: 1
+          KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+        ports:
+          - 9092:9092
+        depends_on:
+          - zookeeper
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: annotation_frontend/package-lock.json
+      
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r annotation_frontend/requirements.txt
+      
+      - name: Install Node.js dependencies
+        working-directory: annotation_frontend
+        run: npm ci
+      
+      - name: Install Playwright browsers
+        working-directory: annotation_frontend
+        run: npx playwright install --with-deps chromium
+      
+      - name: Wait for services to be ready
+        run: |
+          # Wait for Kafka to be ready
+          timeout 60s bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/localhost/9092; do sleep 1; done'
+          # Wait for PostgreSQL to be ready
+          timeout 60s bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/localhost/5432; do sleep 1; done'
+          # Wait for Redis to be ready
+          timeout 60s bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/localhost/6379; do sleep 1; done'
+      
+      - name: Set up database schema
+        run: |
+          # Create database tables if needed
+          python -c "
+          import sys
+          sys.path.append('annotation_frontend')
+          from database import create_tables
+          create_tables()
+          "
+        env:
+          DATABASE_URL: postgresql://surveillance_user:surveillance_pass_5487@localhost:5432/events_db
+      
+      - name: Run Playwright E2E tests
+        working-directory: annotation_frontend
+        run: npx playwright test --project=chromium
+        env:
+          CI: true
+          DATABASE_URL: postgresql://surveillance_user:surveillance_pass_5487@localhost:5432/events_db
+          REDIS_URL: redis://localhost:6379
+          KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+          PORT: 8001
+          ENV: test
+      
+      - name: Upload Playwright Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: annotation_frontend/playwright-report/
+          retention-days: 30
+        - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: annotation_frontend/test-results/
+          retention-days: 30
+
+  performance-tests:
+    runs-on: ubuntu-latest
+    needs: python-lint-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'  # Only run on main branch pushes
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: events_db
+          POSTGRES_USER: surveillance_user
+          POSTGRES_PASSWORD: surveillance_pass_5487
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+      
+      zookeeper:
+        image: confluentinc/cp-zookeeper:7.4.0
+        env:
+          ZOOKEEPER_CLIENT_PORT: 2181
+          ZOOKEEPER_TICK_TIME: 2000
+        ports:
+          - 2181:2181
+      
+      kafka:
+        image: confluentinc/cp-kafka:7.4.0
+        env:
+          KAFKA_BROKER_ID: 1
+          KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+        ports:
+          - 9092:9092
+        depends_on:
+          - zookeeper
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r annotation_frontend/requirements.txt
+          pip install -r performance/requirements-performance.txt
+      
+      - name: Wait for services to be ready
+        run: |
+          # Wait for Kafka to be ready
+          timeout 60s bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/localhost/9092; do sleep 1; done'
+          # Wait for PostgreSQL to be ready
+          timeout 60s bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/localhost/5432; do sleep 1; done'
+          # Wait for Redis to be ready
+          timeout 60s bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/localhost/6379; do sleep 1; done'
+      
+      - name: Set up database schema
+        run: |
+          # Create database tables if needed
+          python -c "
+          import sys
+          sys.path.append('annotation_frontend')
+          from database import create_tables
+          create_tables()
+          "
+        env:
+          DATABASE_URL: postgresql://surveillance_user:surveillance_pass_5487@localhost:5432/events_db
+      
+      - name: Start annotation backend
+        run: |
+          cd annotation_frontend
+          python main.py &
+          echo $! > backend.pid
+          
+          # Wait for backend to be ready
+          timeout 60s bash -c 'until curl -f http://localhost:8001/health 2>/dev/null; do sleep 2; done'
+        env:
+          DATABASE_URL: postgresql://surveillance_user:surveillance_pass_5487@localhost:5432/events_db
+          REDIS_URL: redis://localhost:6379
+          KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+          PORT: 8001
+          ENV: test
+      
+      - name: Run performance tests
+        working-directory: performance
+        run: |
+          # Run load test with performance thresholds
+          locust --headless \
+            --users 50 \
+            --spawn-rate 5 \
+            --run-time 5m \
+            --host http://localhost:8001 \
+            --only-summary \
+            --stop-timeout 10 \
+            --csv results/perf-test \
+            --html results/perf-test-report.html
+        env:
+          CI: true
+      
+      - name: Check performance thresholds
+        working-directory: performance
+        run: |
+          # The locustfile.py contains built-in threshold checking
+          # If thresholds are not met, Locust will exit with code 1
+          python -c "
+          import csv
+          import sys
+          
+          # Read performance results
+          try:
+              with open('results/perf-test_stats.csv', 'r') as f:
+                  reader = csv.DictReader(f)
+                  stats = list(reader)
+              
+              # Find aggregated stats (last row typically)
+              total_stats = None
+              for row in stats:
+                  if 'Aggregated' in row.get('Name', ''):
+                      total_stats = row
+                      break
+              
+              if not total_stats:
+                  print('❌ Could not find aggregated performance stats')
+                  sys.exit(1)
+              
+              # Extract key metrics
+              p95_time = float(total_stats.get('95%', 0))
+              failure_rate = float(total_stats.get('Failure Count', 0)) / max(float(total_stats.get('Request Count', 1)), 1)
+              
+              print(f'📊 Performance Results:')
+              print(f'   95th Percentile: {p95_time:.1f}ms')
+              print(f'   Failure Rate: {failure_rate:.2%}')
+              
+              # Check thresholds (matching locustfile.py)
+              p95_threshold = 200  # ms
+              max_error_rate = 0.05  # 5%
+              
+              if p95_time > p95_threshold:
+                  print(f'❌ 95th percentile ({p95_time:.1f}ms) exceeds threshold ({p95_threshold}ms)')
+                  sys.exit(1)
+              
+              if failure_rate > max_error_rate:
+                  print(f'❌ Failure rate ({failure_rate:.2%}) exceeds threshold ({max_error_rate:.1%})')
+                  sys.exit(1)
+              
+              print('✅ All performance thresholds met')
+              
+          except Exception as e:
+              print(f'❌ Error checking performance thresholds: {e}')
+              sys.exit(1)
+          "
+      
+      - name: Stop backend
+        if: always()
+        run: |
+          if [ -f annotation_frontend/backend.pid ]; then
+            kill $(cat annotation_frontend/backend.pid) || true
+            rm annotation_frontend/backend.pid
+          fi
+      
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: performance-results
+          path: performance/results/
+          retention-days: 30
+      
+      - name: Comment PR with performance results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            
+            try {
+              // Read performance results
+              const csvPath = 'performance/results/perf-test_stats.csv';
+              if (fs.existsSync(csvPath)) {
+                const csvContent = fs.readFileSync(csvPath, 'utf8');
+                const lines = csvContent.split('\n');
+                const header = lines[0];
+                const lastLine = lines[lines.length - 2]; // Skip empty last line
+                
+                if (lastLine && lastLine.includes('Aggregated')) {
+                  const values = lastLine.split(',');
+                  const headerCols = header.split(',');
+                  
+                  const stats = {};
+                  headerCols.forEach((col, idx) => {
+                    stats[col.trim()] = values[idx] ? values[idx].trim() : '';
+                  });
+                  
+                  const comment = `## 🚀 Performance Test Results
+            
+            | Metric | Value | Threshold | Status |
+            |--------|-------|-----------|--------|
+            | 95th Percentile | ${stats['95%']}ms | ≤200ms | ${parseFloat(stats['95%']) <= 200 ? '✅' : '❌'} |
+            | Avg Response Time | ${stats['Average']}ms | - | ℹ️ |
+            | Total Requests | ${stats['Request Count']} | - | ℹ️ |
+            | Failures | ${stats['Failure Count']} | ≤5% | ${(parseFloat(stats['Failure Count']) / parseFloat(stats['Request Count'])) <= 0.05 ? '✅' : '❌'} |
+            
+            **Test Configuration:** 50 users, 5 users/s spawn rate, 5 minutes duration
+            `;
+                  
+                  github.rest.issues.createComment({
+                    issue_number: context.issue.number,
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    body: comment
+                  });
+                }
+              }
+            } catch (error) {
+              console.log('Could not post performance results:', error);
+            }
+
+  ai-dashboard-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Validate AI Dashboard Service dependencies
+        run: |
+          cd ai_dashboard_service
+          python scripts/validate_requirements.py
+      
+      - name: Install AI Dashboard Service dependencies
+        run: |
+          cd ai_dashboard_service
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Audit AI Dashboard Service dependencies for vulnerabilities
+        run: |
+          cd ai_dashboard_service
+          python scripts/audit_dependencies.py
+      
+      - name: Check for unused imports in AI Dashboard Service
+        run: |
+          cd ai_dashboard_service
+          pip install unimport
+          unimport --check --diff app/
+      
+      - name: Check Documentation Coverage in AI Dashboard Service
+        run: |
+          cd ai_dashboard_service
+          python scripts/doc_coverage.py --min-coverage 95
+          echo "✅ Documentation coverage check completed successfully"
+        continue-on-error: false

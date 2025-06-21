@@ -1,0 +1,197 @@
+site_name: AI-Powered Surveillance System Documentation
+site_description: Comprehensive documentation for the AI-powered microservices surveillance system
+site_author: Surveillance System Team
+site_url: https://surveillance-system.docs
+
+# Repository
+repo_name: surveillance-system
+repo_url: https://github.com/your-org/surveillance-system
+edit_uri: edit/main/docs/
+
+# Configuration
+theme:
+  name: material
+  language: en
+  palette:
+    # Light mode
+    - scheme: default
+      primary: blue
+      accent: light blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode  
+    - scheme: slate
+      primary: blue
+      accent: light blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Roboto
+    code: Roboto Mono
+  icon:
+    logo: material/shield-check
+    repo: fontawesome/brands/github
+  features:
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.indexes
+    - toc.follow
+    - toc.integrate
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.annotate
+    - content.code.copy
+    - content.action.edit
+    - content.action.view
+
+# Plugins
+plugins:
+  - search:
+      lang: en
+  - mkdocs-jupyter:
+      execute: false
+  - mermaid2:
+      version: 10.0.0
+  - git-revision-date-localized:
+      type: date
+  - minify:
+      minify_html: true
+
+# Extensions
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - toc:
+      permalink: true
+      title: On this page
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:materialx.emoji.twemoji
+      emoji_generator: !!python/name:materialx.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.magiclink:
+      repo_url_shorthand: true
+      user: your-org
+      repo: surveillance-system
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+# Navigation
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Quick Start: quickstart.md
+    - Installation: installation.md
+    - Configuration: configuration.md
+  - Architecture:
+    - Overview: architecture.md
+    - Services: services.md
+    - Data Flow: data-flow.md
+    - Security: security.md
+  - User Guides:
+    - Annotation Interface: annotation_user_guide.md
+    - Dashboard Usage: dashboard-guide.md
+    - Mobile App: mobile-guide.md
+    - Voice Interface: voice-guide.md  - API Reference:
+    - API Overview: api.md
+    - Authentication: api-auth.md
+    - Video Management: api-vms.md
+    - Annotations: api-annotations.md
+    - Alerts: api-alerts.md
+    - Analytics: api-analytics.md
+  - Integration:
+    - Overview: integration.md
+    - Downstream Integration: DOWNSTREAM_INTEGRATION.md
+  - Development:
+    - Development Setup: dev-setup.md
+    - Contributing: contributing.md
+    - Testing: testing.md
+    - Deployment: deployment.md
+  - Operations:
+    - Monitoring: monitoring.md
+    - Logging: logging.md
+    - Backup & Recovery: backup.md
+    - Troubleshooting: troubleshooting.md
+  - Machine Learning:
+    - Model Training: ml-training.md
+    - Continuous Learning: continuous_learning/
+    - MLflow Integration: mlflow-quickstart.md
+    - Performance Metrics: ml-metrics.md
+
+# Extra
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/your-org/surveillance-system
+    - icon: fontawesome/brands/docker
+      link: https://hub.docker.com/r/your-org/surveillance-system
+    - icon: fontawesome/solid/globe
+      link: https://surveillance-system.com
+  version:
+    provider: mike
+    default: latest
+  analytics:
+    provider: google
+    property: !ENV [GOOGLE_ANALYTICS_KEY, ""]
+    feedback:
+      title: Was this page helpful?
+      ratings:
+        - icon: material/emoticon-happy-outline
+          name: This page was helpful
+          data: 1
+          note: >-
+            Thanks for your feedback!
+        - icon: material/emoticon-sad-outline
+          name: This page could be improved
+          data: 0
+          note: >- 
+            Thanks for your feedback! Help us improve this page by
+            <a href="https://github.com/your-org/surveillance-system/issues/new/?title=[Docs]+{title}+-+{url}" target="_blank" rel="noopener">telling us what you found lacking</a>.
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/config.js
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+# Customization
+copyright: >
+  Copyright &copy; 2025 Surveillance System Team -
+  <a href="#__consent">Change cookie settings</a>
+
+# Site build
+strict: true
+use_directory_urls: true

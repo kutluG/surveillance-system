@@ -15,6 +15,7 @@ from shared.models import CameraEvent
 from shared.middleware import add_rate_limiting
 
 from .storage import get_storage
+from .encrypted_storage import get_encrypted_storage
 from .clip_generator import ClipGenerator
 
 # Configure logging first
@@ -32,8 +33,8 @@ instrument_app(app, service_name="vms_service")
 # Add rate limiting middleware
 add_rate_limiting(app, service_name="vms_service")
 
-# Initialize components
-storage = get_storage()
+# Initialize components with encrypted storage
+storage = get_encrypted_storage()
 clip_generator = ClipGenerator()
 
 class ClipGenerateRequest(BaseModel):

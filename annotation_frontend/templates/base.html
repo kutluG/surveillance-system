@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Surveillance System Annotation{% endblock %}</title>
+    
+    <!-- Preload critical CSS -->
+    <link rel="preload" href="/static/css/annotation.css" as="style">
+    <link href="/static/css/annotation.css" rel="stylesheet">
+    
+    <!-- Preload critical JavaScript modules -->
+    <link rel="preload" href="/static/js/annotation.js" as="script">
+    <link rel="preload" href="/static/js/api.js" as="script">
+    <link rel="preload" href="/static/js/ui.js" as="script">
+    
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-brand">Surveillance System</div>
+        <div class="navbar-menu">
+            <div class="navbar-item">Annotation Tool</div>
+            <div class="navbar-item">Dashboard</div>
+            <div class="navbar-item">Settings</div>
+        </div>
+        <div class="navbar-end">
+            <div class="navbar-item">
+                <button class="logout-button">Logout</button>
+            </div>
+        </div>
+    </nav>
+    
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+    
+    {% include 'footer.html' %}      <!-- API Configuration -->
+    <script>
+        window.API_BASE_URL = "{{ config.API_BASE_URL if config else '' }}";
+        window.API_BASE_PATH = "{{ config.API_BASE_PATH if config else '/api/v1' }}";
+        window.WS_BASE_PATH = "{{ config.WS_BASE_PATH if config else '/ws/v1' }}";
+        window.API_VERSION = "{{ config.API_VERSION if config else 'v1' }}";
+    </script>
+    
+    <!-- Module imports -->
+    <script type="module" src="/static/js/annotation.js"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

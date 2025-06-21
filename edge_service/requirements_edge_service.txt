@@ -1,7 +1,0 @@
-fastapi
-uvicorn[standard]
-opencv-python-headless
-numpy
-paho-mqtt
-tqdm
-# tensorrt or torch-tensorrt to be added when available

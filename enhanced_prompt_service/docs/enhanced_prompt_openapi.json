@@ -1,0 +1,591 @@
+{
+  "openapi": "3.0.2",
+  "info": {
+    "title": "Enhanced Prompt Service API",
+    "version": "1.3.0",
+    "description": "## Enhanced Prompt Service\n\nA sophisticated conversational AI service that provides intelligent, context-aware responses for surveillance system queries. This service combines semantic search, large language models, and conversation memory to deliver enhanced user experiences.\n\n### Key Features:\n- **Semantic Search**: Vector-based search through surveillance events\n- **Conversational AI**: Context-aware responses with conversation memory\n- **Clip Integration**: Automatic video clip URL generation\n- **Follow-up Questions**: Intelligent suggestion of relevant next questions\n- **Proactive Insights**: Pattern detection and anomaly identification\n\n### Authentication:\nAll endpoints require a valid JWT token in the Authorization header:\n```\nAuthorization: Bearer YOUR_JWT_TOKEN\n```\n\n### Rate Limiting:\n- 100 requests per minute per user\n- 20 requests per 10 seconds burst limit",
+    "contact": {
+      "name": "Surveillance System Team",
+      "email": "support@surveillance-system.com"
+    },
+    "license": {
+      "name": "MIT",
+      "url": "https://opensource.org/licenses/MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8000",
+      "description": "Development server"
+    },
+    {
+      "url": "https://api.surveillance-system.com",
+      "description": "Production server"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health Check",
+        "description": "Check service health status",
+        "operationId": "health_check",
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "ok"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/conversation": {
+      "post": {
+        "summary": "Enhanced Conversation",
+        "description": "Submit a query and receive an AI-powered conversational response with context and follow-up suggestions",
+        "operationId": "enhanced_conversation",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/proactive-insights": {
+      "get": {
+        "summary": "Get Proactive Insights",
+        "description": "Get AI-generated insights about system patterns and anomalies",
+        "operationId": "get_proactive_insights",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "time_range",
+            "in": "query",
+            "description": "Time window for analysis",
+            "schema": {
+              "type": "string",
+              "enum": ["1h", "24h", "7d", "30d"],
+              "default": "24h"
+            }
+          },
+          {
+            "name": "severity_threshold",
+            "in": "query",
+            "description": "Minimum severity level",
+            "schema": {
+              "type": "string",
+              "enum": ["low", "medium", "high"],
+              "default": "medium"
+            }
+          },
+          {
+            "name": "include_predictions",
+            "in": "query",
+            "description": "Include predictive insights",
+            "schema": {
+              "type": "boolean",
+              "default": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Proactive insights",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ConversationResponse"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/conversation/{conversation_id}/history": {
+      "get": {
+        "summary": "Get Conversation History",
+        "description": "Get the message history for a specific conversation",
+        "operationId": "get_conversation_history",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "description": "Conversation identifier",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum messages to return",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Conversation history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationHistory"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Conversation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/conversation/{conversation_id}": {
+      "delete": {
+        "summary": "Delete Conversation",
+        "description": "Delete a conversation and all its message history",
+        "operationId": "delete_conversation",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "description": "Conversation identifier",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Conversation deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "example": "Conversation deleted successfully"
+                    },
+                    "conversation_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Conversation not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT token for authentication. Format: Bearer {token}"
+      }
+    },
+    "schemas": {
+      "ConversationRequest": {
+        "type": "object",
+        "required": ["query"],
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "User's question or query",
+            "example": "Show me any security incidents from camera 5 today"
+          },
+          "conversation_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Existing conversation ID (creates new if omitted)",
+            "example": "conv_123e4567-e89b-12d3-a456-426614174000"
+          },
+          "user_context": {
+            "type": "object",
+            "nullable": true,
+            "description": "Additional context metadata",
+            "example": {
+              "user_role": "security_manager",
+              "timezone": "America/New_York"
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum search results",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 50
+          }
+        }
+      },
+      "ConversationResponse": {
+        "type": "object",
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "description": "Unique conversation identifier",
+            "example": "conv_123e4567-e89b-12d3-a456-426614174000"
+          },
+          "response": {
+            "type": "string",
+            "description": "AI-generated response text",
+            "example": "I found 3 security incidents from camera 5 today. The most significant was a person detected in a restricted area at 14:32 with high confidence."
+          },
+          "follow_up_questions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Suggested follow-up questions",
+            "example": [
+              "Can you show me the video clip from the 14:32 incident?",
+              "What was the confidence level for each detection?"
+            ]
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Evidence"
+            },
+            "description": "Supporting evidence from search"
+          },
+          "clip_links": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClipLink"
+            },
+            "description": "Related video clip URLs"
+          },
+          "confidence_score": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Response confidence (0.0-1.0)",
+            "example": 0.89
+          },
+          "response_type": {
+            "type": "string",
+            "enum": ["answer", "clarification", "proactive_insight"],
+            "description": "Type of response provided"
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Additional response metadata",
+            "example": {
+              "search_time_ms": 45,
+              "llm_time_ms": 1200,
+              "total_events_found": 3
+            }
+          }
+        }
+      },
+      "Evidence": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Event identifier",
+            "example": "evt_789"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Event timestamp",
+            "example": "2025-06-18T14:32:15Z"
+          },
+          "camera_id": {
+            "type": "string",
+            "description": "Camera identifier",
+            "example": "camera_5"
+          },
+          "event_type": {
+            "type": "string",
+            "description": "Type of event",
+            "example": "person_detected"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Event confidence score",
+            "example": 0.94
+          },
+          "details": {
+            "type": "string",
+            "description": "Event details",
+            "example": "Person detected in restricted area Zone-A"
+          }
+        }
+      },
+      "ClipLink": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Video clip URL",
+            "example": "http://localhost:8001/clips/evt_789.mp4"
+          },
+          "event_id": {
+            "type": "string",
+            "description": "Associated event ID",
+            "example": "evt_789"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Clip timestamp",
+            "example": "2025-06-18T14:32:15Z"
+          },
+          "camera_id": {
+            "type": "string",
+            "description": "Camera identifier",
+            "example": "camera_5"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Detection confidence",
+            "example": 0.94
+          },
+          "description": {
+            "type": "string",
+            "description": "Clip description",
+            "example": "Person detected in restricted area"
+          }
+        }
+      },
+      "ConversationHistory": {
+        "type": "object",
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "description": "Conversation identifier",
+            "example": "conv_123e4567-e89b-12d3-a456-426614174000"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            },
+            "description": "List of messages in conversation"
+          },
+          "total_messages": {
+            "type": "integer",
+            "description": "Total number of messages",
+            "example": 12
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Conversation creation timestamp",
+            "example": "2025-06-18T09:15:00Z"
+          },
+          "last_activity": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last activity timestamp",
+            "example": "2025-06-18T10:30:02Z"
+          }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Message identifier",
+            "example": "msg_456"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["user", "assistant"],
+            "description": "Message role"
+          },
+          "content": {
+            "type": "string",
+            "description": "Message content",
+            "example": "Show me security incidents from today"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Message timestamp",
+            "example": "2025-06-18T10:30:00Z"
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Message metadata",
+            "example": {
+              "confidence_score": 0.92,
+              "evidence_count": 5
+            }
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string",
+            "description": "Error description",
+            "example": "Invalid request parameters"
+          },
+          "error_code": {
+            "type": "string",
+            "description": "Specific error code",
+            "example": "INVALID_QUERY"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Error timestamp",
+            "example": "2025-06-18T10:30:00Z"
+          },
+          "path": {
+            "type": "string",
+            "description": "Request path",
+            "example": "/api/v1/conversation"
+          },
+          "correlation_id": {
+            "type": "string",
+            "description": "Request correlation ID",
+            "example": "req_123456"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Health",
+      "description": "Service health and status endpoints"
+    },
+    {
+      "name": "Conversation",
+      "description": "Conversational AI endpoints"
+    },
+    {
+      "name": "Insights",
+      "description": "Proactive insights and analytics"
+    }
+  ]
+}

@@ -5,14 +5,91 @@ import os
 import weaviate
 import weaviate.classes as wvc
 from typing import List, Dict, Any, Optional
+from urllib.parse import urlparse
+from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
+from fastapi import HTTPException
 
-WEAVIATE_URL = os.getenv("WEAVIATE_URL", "http://weaviate:8080")
-WEAVIATE_API_KEY = os.getenv("WEAVIATE_API_KEY", "")
+from shared.config import get_service_config
+from shared.logging_config import get_logger
 
-client = weaviate.connect_to_local(
-    host="weaviate",
-    port=8080
+logger = get_logger(__name__)
+
+# Get service configuration
+config = get_service_config("enhanced_prompt_service")
+
+# Parse Weaviate URL
+weaviate_url = config["weaviate_url"]
+parsed_url = urlparse(weaviate_url)
+
+# Global client variable - will be initialized lazily
+_client = None
+
+def get_client():
+    """Get Weaviate client, initializing lazily to avoid connection during import."""
+    global _client
+    if _client is None:
+        try:
+            _client = weaviate.connect_to_local(
+                host=parsed_url.hostname or "weaviate",
+                port=parsed_url.port or 8080
+            )
+        except Exception as e:
+            logger.warning(f"Failed to connect to Weaviate: {e}")
+            # Return a mock client or handle gracefully
+            _client = None
+    return _client
+
+@retry(
+    stop=stop_after_attempt(3), 
+    wait=wait_exponential(multiplier=1, max=10),
+    reraise=True
 )
+def weaviate_search_with_circuit_breaker(query: str, limit: int, filters: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+    """
+    Perform Weaviate search with circuit breaker protection.
+    Retries up to 3 times with exponential backoff.
+    """
+    client = get_client()
+    if not client:
+        raise Exception("Weaviate client not available")
+    
+    try:
+        logger.info("Calling Weaviate search", extra={"query": query[:50], "limit": limit})
+        
+        collection = client.collections.get("CameraEvent")
+        
+        # Build the query
+        query_builder = collection.query.near_text(query=query, limit=limit)
+        
+        # Apply filters if provided
+        if filters:
+            # Convert filters to Weaviate format
+            where_filter = _build_where_filter(filters)
+            if where_filter:
+                query_builder = query_builder.where(where_filter)
+        
+        results = query_builder.objects
+        
+        # Convert to the expected format
+        formatted_results = []
+        for obj in results:
+            properties = obj.properties
+            formatted_results.append({
+                "event_id": properties.get("event_id"),
+                "timestamp": properties.get("timestamp"),
+                "camera_id": properties.get("camera_id"),
+                "event_type": properties.get("event_type"),
+                "details": properties.get("details"),
+                "confidence": properties.get("confidence", 0.0),
+                "score": obj.metadata.score if hasattr(obj.metadata, 'score') else 0.0
+            })
+        
+        logger.info("Weaviate search successful", extra={"results_count": len(formatted_results)})
+        return formatted_results
+        
+    except Exception as e:
+        logger.error("Weaviate search failed", extra={"error": str(e), "query": query[:50]})
+        raise
 
 def semantic_search(
     query: str, 
@@ -29,63 +106,19 @@ def semantic_search(
         conversation_context: Previous conversation messages for context
         filters: Additional filters (camera_id, event_type, time_range, etc.)
     
-    Returns:
-        List of result dicts with event properties and enhanced metadata
+    Returns:        List of result dicts with event properties and enhanced metadata
     """
     try:
-        collection = client.collections.get("CameraEvent")
+        # Use circuit breaker protected search
+        return weaviate_search_with_circuit_breaker(query, limit, filters)
         
-        # Build enhanced query considering conversation context
-        enhanced_query = _build_enhanced_query(query, conversation_context)
-        
-        # Build where filter if filters provided
-        where_filter = _build_where_filter(filters) if filters else None
-        
-        # Perform search
-        if where_filter:
-            response = collection.query.near_text(
-                query=enhanced_query,
-                limit=limit,
-                where=where_filter,
-                return_metadata=wvc.query.MetadataQuery(certainty=True, distance=True)
-            )
-        else:
-            response = collection.query.near_text(
-                query=enhanced_query,
-                limit=limit,
-                return_metadata=wvc.query.MetadataQuery(certainty=True, distance=True)
-            )
-        
-        # Process results with enhanced metadata
-        results = []
-        for obj in response.objects:
-            result = {
-                "event_id": obj.properties.get("event_id"),
-                "timestamp": obj.properties.get("timestamp"),
-                "camera_id": obj.properties.get("camera_id"),
-                "event_type": obj.properties.get("event_type"),
-                "details": obj.properties.get("details", ""),
-                "location": obj.properties.get("location", ""),
-                "confidence": obj.properties.get("confidence", 0.0),
-                
-                # Enhanced metadata
-                "certainty": obj.metadata.certainty if obj.metadata else None,
-                "distance": obj.metadata.distance if obj.metadata else None,
-                "relevance_score": _calculate_relevance_score(obj, query, conversation_context),
-                "context_match": _assess_context_match(obj, conversation_context),
-                
-                # Additional context fields
-                "detection_labels": obj.properties.get("detection_labels", []),
-                "anomaly_score": obj.properties.get("anomaly_score", 0.0),
-                "priority": obj.properties.get("priority", "low"),
-                "related_events": obj.properties.get("related_events", [])
-            }
-            results.append(result)
-        
-        # Sort by relevance score
-        results.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
-        
-        return results
+    except RetryError as e:
+        logger.error("Weaviate retry exhausted", extra={"error": str(e), "query": query[:50]})
+        raise HTTPException(status_code=503, detail="Upstream service unavailable")
+    except Exception as e:
+        logger.error("Semantic search failed", extra={"error": str(e), "query": query[:50]})
+        # Return empty results instead of failing completely
+        return []
         
     except Exception as e:
         print(f"Enhanced Weaviate search error: {e}")
@@ -138,11 +171,14 @@ def get_related_events(
         event_id: Reference event ID
         relation_types: Types of relationships to consider
         limit: Maximum number of related events
-    
-    Returns:
+      Returns:
         List of related events with relationship metadata
     """
     try:
+        client = get_client()
+        if not client:
+            return []
+            
         # First get the reference event
         collection = client.collections.get("CameraEvent")
         ref_response = collection.query.fetch_objects(
@@ -321,15 +357,15 @@ def _assess_context_match(
 
 def _analyze_event_patterns(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Analyze patterns in search results."""
-    if not results:
-        return {}
-    
     patterns = {
         "most_common_cameras": {},
         "most_common_types": {},
         "confidence_distribution": {},
         "time_patterns": []
     }
+    
+    if not results:
+        return patterns
     
     # Analyze camera frequency
     for result in results:
@@ -440,11 +476,44 @@ def _find_semantic_related(ref_event: Any, collection: Any, limit: int) -> List[
                         "timestamp": obj.properties.get("timestamp"),
                         "camera_id": obj.properties.get("camera_id"),
                         "event_type": obj.properties.get("event_type"),
-                        "relationship_type": "semantic",
-                        "relationship_strength": obj.metadata.certainty if obj.metadata else 0.5
+                        "relationship_type": "semantic",                        "relationship_strength": obj.metadata.certainty if obj.metadata else 0.5
                     })
     
     except Exception as e:
         print(f"Semantic search error: {e}")
     
     return related
+
+def _build_where_filter(filters: Dict[str, Any]) -> Optional[Any]:
+    """Build Weaviate where filter from provided filters."""
+    if not filters:
+        return None
+    
+    conditions = []
+    
+    if "camera_id" in filters:
+        conditions.append(wvc.query.Filter.by_property("camera_id").equal(filters["camera_id"]))
+    
+    if "event_type" in filters:
+        conditions.append(wvc.query.Filter.by_property("event_type").equal(filters["event_type"]))
+    
+    if "time_range" in filters:
+        time_range = filters["time_range"]
+        if "start" in time_range:
+            conditions.append(wvc.query.Filter.by_property("timestamp").greater_or_equal(time_range["start"]))
+        if "end" in time_range:
+            conditions.append(wvc.query.Filter.by_property("timestamp").less_or_equal(time_range["end"]))
+    
+    if "confidence_min" in filters:
+        conditions.append(wvc.query.Filter.by_property("confidence").greater_or_equal(filters["confidence_min"]))
+    
+    # Combine conditions with AND
+    if len(conditions) == 1:
+        return conditions[0]
+    elif len(conditions) > 1:
+        result = conditions[0]
+        for condition in conditions[1:]:
+            result = result & condition
+        return result
+    
+    return None

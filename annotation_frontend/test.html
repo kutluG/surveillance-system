@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Annotation Frontend Test</title>
+    <link rel="stylesheet" href="static/css/annotation.css">
+    <script>
+        // Configure API base URL for testing
+        window.API_BASE_URL = "http://localhost:8000";
+        
+        // Mock fetch for testing UI functionality
+        window.fetch = async (url, options) => {
+            console.log('Fetch called with:', url, options);
+            
+            if (url.includes('/api/v1/examples') && !options) {
+                // Mock examples list
+                return {
+                    ok: true,
+                    json: async () => ({
+                        examples: [
+                            {
+                                event_id: "test-001",
+                                camera_id: "cam-1", 
+                                timestamp: "2025-06-16T10:00:00Z",
+                                reason: "Low confidence detection",
+                                confidence_scores: { person: 0.3 }
+                            },
+                            {
+                                event_id: "test-002",
+                                camera_id: "cam-2",
+                                timestamp: "2025-06-16T10:05:00Z", 
+                                reason: "Object boundary unclear",
+                                confidence_scores: { car: 0.4 }
+                            }
+                        ],
+                        total: 2
+                    })
+                };
+            } else if (url.includes('/api/v1/examples/') && !url.includes('/label')) {
+                // Mock single example
+                return {
+                    ok: true,
+                    json: async () => ({
+                        event_id: "test-001",
+                        camera_id: "cam-1",
+                        timestamp: "2025-06-16T10:00:00Z",
+                        image_path: "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2VlZSIvPgogIDx0ZXh0IHg9IjE1MCIgeT0iMTAwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzMzMyI+VGVzdCBJbWFnZTwvdGV4dD4KPC9zdmc+",
+                        original_detections: [
+                            {
+                                bbox: { x1: 50, y1: 30, x2: 150, y2: 130 },
+                                class_name: "person",
+                                confidence: 0.3
+                            }
+                        ]
+                    })
+                };
+            } else if (url.includes('/label') || options?.method === 'POST') {
+                // Mock annotation submission
+                return {
+                    ok: true,
+                    json: async () => ({ success: true, message: "Annotation saved successfully" })
+                };
+            } else if (options?.method === 'DELETE') {
+                // Mock skip
+                return {
+                    ok: true,
+                    json: async () => ({ success: true, message: "Example skipped" })
+                };
+            }
+            
+            // Default error response
+            throw new Error('Mock fetch: Unhandled request');
+        };
+    </script>
+</head>
+<body>
+    <div class="container">
+        <h1>Annotation Frontend - JavaScript Test</h1>
+        
+        <!-- Main content will be populated by JavaScript -->
+        <div id="main-content">
+            <div class="card">
+                <div class="card-header">
+                    <h2>Test Status</h2>
+                </div>
+                <div class="card-body">
+                    <button id="test-api" class="btn btn-primary">Test API Module</button>
+                    <button id="test-ui" class="btn btn-success">Test UI Module</button>
+                    <div id="test-results" class="mt-3"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Include annotation interface elements -->
+        <div id="examples-list"></div>
+        <div id="annotation-interface" class="d-none">
+            <div class="card">
+                <div class="card-header">
+                    <h3 id="example-title">Example Details</h3>
+                </div>
+                <div class="card-body">
+                    <div id="image-container" class="image-container"></div>
+                    <div id="original-detections"></div>
+                    <div id="corrected-detections"></div>
+                    <button id="save-annotation" class="btn btn-primary">Save Annotation</button>
+                    <button id="skip-example" class="btn btn-secondary">Skip Example</button>
+                    <button id="back-to-list" class="btn btn-warning">Back to List</button>
+                </div>
+            </div>
+        </div>
+        
+        <div id="messages"></div>
+    </div>
+
+    <script type="module" src="static/js/annotation.js"></script>
+    <script>
+        // Add test functionality
+        document.addEventListener('DOMContentLoaded', () => {
+            const testApiBtn = document.getElementById('test-api');
+            const testUiBtn = document.getElementById('test-ui');
+            const testResults = document.getElementById('test-results');
+            
+            if (testApiBtn) {
+                testApiBtn.addEventListener('click', async () => {
+                    testResults.innerHTML = '<p>Testing API module...</p>';
+                    try {
+                        // Test will be done by the loaded annotation.js module
+                        testResults.innerHTML = '<div class="alert alert-success">API module is loaded and working!</div>';
+                    } catch (error) {
+                        testResults.innerHTML = `<div class="alert alert-error">API test failed: ${error.message}</div>`;
+                    }
+                });
+            }
+            
+            if (testUiBtn) {
+                testUiBtn.addEventListener('click', () => {
+                    testResults.innerHTML = '<div class="alert alert-info">UI module test - this message uses safe DOM manipulation!</div>';
+                });
+            }
+        });
+    </script>
+</body>
+</html>

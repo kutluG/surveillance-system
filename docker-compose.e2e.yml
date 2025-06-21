@@ -1,0 +1,143 @@
+# Docker Compose configuration for E2E testing
+# This creates a minimal test environment for Playwright tests
+
+version: '3.8'
+
+services:
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: postgres-test
+    environment:
+      POSTGRES_DB: events_db
+      POSTGRES_USER: surveillance_user
+      POSTGRES_PASSWORD: surveillance_pass_5487
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    ports:
+      - "5433:5432"  # Use different port to avoid conflicts
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U surveillance_user -d events_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    tmpfs:
+      - /var/lib/postgresql/data:noexec,nosuid,size=512m
+
+  redis-test:
+    image: redis:7-alpine
+    container_name: redis-test
+    ports:
+      - "6380:6379"  # Use different port to avoid conflicts
+    volumes:
+      - redis_test_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+
+  zookeeper-test:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: zookeeper-test
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_SYNC_LIMIT: 2
+      ZOOKEEPER_INIT_LIMIT: 5
+    ports:
+      - "2182:2181"  # Use different port to avoid conflicts
+    volumes:
+      - zookeeper_test_data:/var/lib/zookeeper/data
+      - zookeeper_test_logs:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo 'ruok' | nc localhost 2181 | grep imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  kafka-test:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka-test
+    depends_on:
+      zookeeper-test:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper-test:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-test:29092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 1
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0 # Reduce startup time in test
+      KAFKA_LOG_RETENTION_HOURS: 1  # Short retention for tests
+      KAFKA_LOG_SEGMENT_BYTES: 1048576  # 1MB segments for tests
+    ports:
+      - "9093:9093"  # Use different port to avoid conflicts
+    volumes:
+      - kafka_test_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9093"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  annotation-backend-test:
+    build:
+      context: ./annotation_frontend
+      dockerfile: Dockerfile.test
+    container_name: annotation-backend-test
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+      kafka-test:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://surveillance_user:surveillance_pass_5487@postgres-test:5432/events_db
+      REDIS_URL: redis://redis-test:6379
+      KAFKA_BOOTSTRAP_SERVERS: kafka-test:29092
+      PORT: 8001
+      ENV: test
+      PYTHONPATH: /app
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./annotation_frontend:/app
+      - ./shared:/app/shared
+    working_directory: /app
+    command: python main.py
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  postgres_test_data:
+    driver: local
+  redis_test_data:
+    driver: local
+  zookeeper_test_data:
+    driver: local
+  zookeeper_test_logs:
+    driver: local
+  kafka_test_data:
+    driver: local
+
+networks:
+  default:
+    name: surveillance-e2e-test
+    driver: bridge

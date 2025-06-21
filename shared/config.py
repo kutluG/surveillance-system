@@ -3,7 +3,10 @@ Configuration management for all services.
 """
 import os
 from typing import Dict, Any
-from pydantic import BaseSettings
+try:
+    from pydantic_settings import BaseSettings
+except ImportError:
+    from pydantic import BaseSettings
 
 class Settings(BaseSettings):
     """Application settings with environment variable support."""
@@ -31,12 +34,16 @@ class Settings(BaseSettings):
     
     # OpenAI
     openai_api_key: str = ""
-    openai_model: str = "gpt-4"
+    openai_model: str = "gpt-4"    # API Configuration
+    api_base_path: str = "/api/v1"
     
     # Authentication
     jwt_secret_key: str = "your-secret-key-change-in-production"
     jwt_algorithm: str = "HS256"
     jwt_expiration_hours: int = 24
+    
+    # Encryption
+    encryption_key: str = os.getenv("ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
     
     # Video Storage
     video_storage_type: str = "local"  # "local" or "s3"
@@ -130,8 +137,7 @@ def get_service_config(service_name: str) -> Dict[str, Any]:
             "twilio_from_number": settings.twilio_from_number,
             "webhook_url": settings.webhook_url,
             "webhook_secret": settings.webhook_secret,
-        },
-        "vms_service": {
+        },        "vms_service": {
             "video_storage_type": settings.video_storage_type,
             "s3_bucket_name": settings.s3_bucket_name,
             "aws_region": settings.aws_region,
@@ -142,8 +148,8 @@ def get_service_config(service_name: str) -> Dict[str, Any]:
             "post_event_buffer_seconds": int(os.getenv("POST_EVENT_BUFFER_SECONDS", "20")),
             "clip_fps": int(os.getenv("CLIP_FPS", "15")),
             "clip_resolution": os.getenv("CLIP_RESOLUTION", "640,480"),
-        },
-        "mqtt_kafka_bridge": {
+            "encryption_key": settings.encryption_key,
+        },        "mqtt_kafka_bridge": {
             "mqtt_broker": settings.mqtt_broker,
             "mqtt_port": settings.mqtt_port,
             "mqtt_tls_ca": settings.mqtt_tls_ca,
@@ -152,6 +158,17 @@ def get_service_config(service_name: str) -> Dict[str, Any]:
             "mqtt_topic_sub": os.getenv("MQTT_TOPIC_SUB", "camera/events/#"),
             "kafka_broker": settings.kafka_broker,
             "kafka_topic": settings.kafka_topic,
+        },
+        "enhanced_prompt_service": {
+            "weaviate_url": settings.weaviate_url,
+            "weaviate_api_key": settings.weaviate_api_key,
+            "openai_api_key": settings.openai_api_key,
+            "openai_model": settings.openai_model,
+            "redis_url": settings.redis_url,
+            "vms_service_url": settings.vms_service_url,
+            "clip_base_url": settings.clip_base_url,
+            "default_clip_expiry_minutes": int(os.getenv("DEFAULT_CLIP_EXPIRY_MINUTES", "60")),
+            "thumbnail_base_url": os.getenv("THUMBNAIL_BASE_URL", f"{settings.clip_base_url}/thumbnails"),
         },
     }
     

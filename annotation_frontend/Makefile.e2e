@@ -1,0 +1,223 @@
+# Makefile for E2E Testing
+# Provides convenient commands for running Playwright E2E tests
+
+.PHONY: help install test test-headed test-debug test-all clean setup-docker teardown-docker
+
+# Default target
+help: ## Show this help message
+	@echo "E2E Testing Commands:"
+	@echo ""
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "Examples:"
+	@echo "  make install          # Install dependencies"
+	@echo "  make test             # Run all E2E tests"
+	@echo "  make test-headed      # Run tests with visible browser"
+	@echo "  make test-debug       # Run tests in debug mode"
+	@echo "  make test-chrome      # Run tests in Chrome only"
+	@echo "  make test-docker      # Run tests using Docker services"
+
+# Variables
+BROWSER ?= chromium
+NODE_MODULES = node_modules
+PLAYWRIGHT_BROWSERS = $(HOME)/.cache/ms-playwright
+
+# Installation targets
+install: $(NODE_MODULES) ## Install Node.js dependencies
+$(NODE_MODULES): package.json package-lock.json
+	npm ci
+	touch $(NODE_MODULES)
+
+install-browsers: $(NODE_MODULES) ## Install Playwright browsers
+	npx playwright install --with-deps
+	@echo "✅ Playwright browsers installed"
+
+install-all: install install-browsers ## Install all dependencies
+
+# Test targets
+test: $(NODE_MODULES) ## Run E2E tests (headless)
+	npx playwright test --project=$(BROWSER)
+
+test-all: $(NODE_MODULES) ## Run E2E tests on all browsers
+	npx playwright test
+
+test-headed: $(NODE_MODULES) ## Run E2E tests with visible browser
+	npx playwright test --project=$(BROWSER) --headed
+
+test-debug: $(NODE_MODULES) ## Run E2E tests in debug mode
+	npx playwright test --project=$(BROWSER) --debug
+
+test-chrome: $(NODE_MODULES) ## Run E2E tests in Chrome
+	npx playwright test --project=chromium
+
+test-firefox: $(NODE_MODULES) ## Run E2E tests in Firefox
+	npx playwright test --project=firefox
+
+test-safari: $(NODE_MODULES) ## Run E2E tests in Safari
+	npx playwright test --project=webkit
+
+test-mobile: $(NODE_MODULES) ## Run E2E tests on mobile devices
+	npx playwright test --project="Mobile Chrome" --project="Mobile Safari"
+
+test-specific: $(NODE_MODULES) ## Run specific test file (use FILE=path/to/test.spec.ts)
+	npx playwright test $(FILE) --project=$(BROWSER)
+
+test-grep: $(NODE_MODULES) ## Run tests matching pattern (use PATTERN=test-name)
+	npx playwright test --grep "$(PATTERN)" --project=$(BROWSER)
+
+# Docker targets
+setup-docker: ## Start Docker test environment
+	@echo "🐳 Starting Docker test environment..."
+	docker-compose -f ../docker-compose.e2e.yml up -d
+	@echo "⏳ Waiting for services to be ready..."
+	@sleep 10
+	@echo "✅ Docker environment is ready"
+
+test-docker: setup-docker $(NODE_MODULES) ## Run E2E tests using Docker services
+	@echo "🧪 Running E2E tests with Docker services..."
+	DATABASE_URL=postgresql://surveillance_user:surveillance_pass_5487@localhost:5433/events_db \
+	REDIS_URL=redis://localhost:6380 \
+	KAFKA_BOOTSTRAP_SERVERS=localhost:9093 \
+	PORT=8001 \
+	ENV=test \
+	npx playwright test --project=$(BROWSER)
+
+teardown-docker: ## Stop Docker test environment
+	@echo "🛑 Stopping Docker test environment..."
+	docker-compose -f ../docker-compose.e2e.yml down -v --remove-orphans
+	@echo "✅ Docker environment stopped"
+
+# Report targets
+report: ## Show test report
+	npx playwright show-report
+
+report-open: ## Open test report in browser
+	@if [ -f "playwright-report/index.html" ]; then \
+		echo "📊 Opening test report..."; \
+		npx playwright show-report; \
+	else \
+		echo "❌ No test report found. Run tests first."; \
+	fi
+
+trace: ## Open trace viewer for failed tests
+	@if ls test-results/*.zip 1> /dev/null 2>&1; then \
+		echo "🔍 Opening trace viewer..."; \
+		npx playwright show-trace test-results/*.zip; \
+	else \
+		echo "❌ No trace files found. Run tests with failures first."; \
+	fi
+
+# Utility targets
+clean: ## Clean test artifacts and dependencies
+	@echo "🧹 Cleaning test artifacts..."
+	rm -rf test-results/
+	rm -rf playwright-report/
+	rm -rf node_modules/
+	@echo "✅ Cleaned test artifacts"
+
+clean-artifacts: ## Clean only test artifacts (keep dependencies)
+	@echo "🧹 Cleaning test artifacts..."
+	rm -rf test-results/
+	rm -rf playwright-report/
+	@echo "✅ Cleaned test artifacts"
+
+check-deps: ## Check if all dependencies are installed
+	@echo "🔍 Checking dependencies..."
+	@command -v node >/dev/null 2>&1 || { echo "❌ Node.js is not installed"; exit 1; }
+	@command -v npm >/dev/null 2>&1 || { echo "❌ npm is not installed"; exit 1; }
+	@command -v python >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1 || { echo "❌ Python is not installed"; exit 1; }
+	@[ -d "$(NODE_MODULES)" ] || { echo "❌ Node modules not installed. Run 'make install'"; exit 1; }
+	@echo "✅ All dependencies are available"
+
+lint: $(NODE_MODULES) ## Run linting on test files
+	@echo "🔍 Linting test files..."
+	npx eslint "e2e/**/*.ts" --fix || true
+	@echo "✅ Linting completed"
+
+format: $(NODE_MODULES) ## Format test files
+	@echo "✨ Formatting test files..."
+	npx prettier "e2e/**/*.ts" --write || true
+	@echo "✅ Formatting completed"
+
+# Development targets
+dev-setup: install-all check-deps ## Complete development setup
+	@echo "🚀 Development environment is ready!"
+	@echo ""
+	@echo "Next steps:"
+	@echo "  make test         # Run basic tests"
+	@echo "  make test-headed  # Run tests with visible browser"
+	@echo "  make test-debug   # Debug tests interactively"
+
+ci-test: install-all ## Run tests in CI mode
+	@echo "🤖 Running tests in CI mode..."
+	CI=true npx playwright test --project=chromium
+	@echo "✅ CI tests completed"
+
+# Health check targets
+health-check: ## Check if test environment is healthy
+	@echo "🩺 Checking test environment health..."
+	@curl -f http://localhost:8001/health >/dev/null 2>&1 && echo "✅ Annotation backend is healthy" || echo "❌ Annotation backend is not responding"
+	@curl -f http://localhost:8001/ >/dev/null 2>&1 && echo "✅ Frontend is accessible" || echo "❌ Frontend is not accessible"
+
+wait-for-services: ## Wait for all services to be ready
+	@echo "⏳ Waiting for services to be ready..."
+	@timeout 60s bash -c 'until printf "" 2>>/dev/null >>/dev/tcp/localhost/8001; do sleep 1; done' && echo "✅ Services are ready" || echo "❌ Services failed to start"
+
+# Documentation targets
+docs: ## Generate test documentation
+	@echo "📚 Generating test documentation..."
+	@find e2e/ -name "*.ts" -exec grep -l "test\|describe" {} \; | xargs -I {} echo "Test file: {}"
+	@echo "✅ Documentation generated"
+
+# Parallel execution targets
+test-parallel: $(NODE_MODULES) ## Run tests in parallel (faster)
+	npx playwright test --workers=4
+
+test-serial: $(NODE_MODULES) ## Run tests serially (slower but more stable)
+	npx playwright test --workers=1
+
+# Browser-specific shortcuts
+chrome: test-chrome ## Alias for test-chrome
+firefox: test-firefox ## Alias for test-firefox
+safari: test-safari ## Alias for test-safari
+mobile: test-mobile ## Alias for test-mobile
+
+# Quick shortcuts
+t: test ## Quick alias for test
+th: test-headed ## Quick alias for test-headed
+td: test-debug ## Quick alias for test-debug
+ta: test-all ## Quick alias for test-all
+
+# Environment-specific targets
+test-local: ## Run tests against local services
+	@echo "🏠 Running tests against local services..."
+	DATABASE_URL=postgresql://surveillance_user:surveillance_pass_5487@localhost:5432/events_db \
+	REDIS_URL=redis://localhost:6379 \
+	KAFKA_BOOTSTRAP_SERVERS=localhost:9092 \
+	PORT=8001 \
+	ENV=test \
+	npx playwright test --project=$(BROWSER)
+
+test-staging: ## Run tests against staging environment
+	@echo "🎭 Running tests against staging environment..."
+	DATABASE_URL=$(STAGING_DATABASE_URL) \
+	REDIS_URL=$(STAGING_REDIS_URL) \
+	KAFKA_BOOTSTRAP_SERVERS=$(STAGING_KAFKA_BOOTSTRAP_SERVERS) \
+	PORT=8001 \
+	ENV=staging \
+	npx playwright test --project=$(BROWSER)
+
+# Performance testing
+test-perf: $(NODE_MODULES) ## Run performance-focused tests
+	@echo "⚡ Running performance tests..."
+	npx playwright test --grep="performance|speed|load" --project=$(BROWSER)
+
+# Security testing
+test-security: $(NODE_MODULES) ## Run security-focused tests
+	@echo "🔒 Running security tests..."
+	npx playwright test --grep="security|auth|xss|csrf" --project=$(BROWSER)
+
+# Accessibility testing
+test-a11y: $(NODE_MODULES) ## Run accessibility tests
+	@echo "♿ Running accessibility tests..."
+	npx playwright test --grep="accessibility|a11y" --project=$(BROWSER)

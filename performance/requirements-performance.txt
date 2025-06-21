@@ -1,0 +1,16 @@
+# Performance Testing Requirements
+# Install with: pip install -r requirements-performance.txt
+
+# Core load testing framework
+locust>=2.17.0
+
+# Additional utilities for performance analysis
+psutil>=5.9.0          # System resource monitoring
+requests>=2.31.0       # HTTP client (used by Locust)
+matplotlib>=3.7.0      # For generating performance charts
+pandas>=2.0.0          # For data analysis and reporting
+numpy>=1.24.0          # Mathematical operations
+
+# Optional: Advanced monitoring and reporting
+# locust-plugins>=4.3.0  # Additional Locust features
+# prometheus-client>=0.18.0  # Prometheus metrics export

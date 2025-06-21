@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- WebSocket Status Indicator -->
+<div id="websocket-status" class="websocket-status connecting">
+    <span id="websocket-text">Connecting...</span>
+</div>
+
+<div class="container-fluid mt-4">
+    <div class="row">
+        <!-- Stats Panel -->
+        <div class="col-md-3">
+            <div class="card stats-card mb-4">
+                <div class="card-body text-center">
+                    <h5 class="card-title">Annotation Queue</h5>
+                    <h2 id="pending-count">{{ pending_count }}</h2>
+                    <p class="card-text">Examples pending annotation</p>
+                </div>
+            </div>
+              <!-- Example List -->
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="mb-0">Pending Examples</h6>
+                </div>
+                <div class="card-body" id="examples-list" style="max-height: 500px; overflow-y: auto;">
+                    <div class="text-center">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <div id="pagination-container"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Annotation Panel -->
+        <div class="col-md-9">
+            <div id="annotation-panel" class="card" style="display: none;">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 id="current-example-title">Annotating Example</h5>                    <div>
+                        <button class="btn btn-outline-secondary btn-sm" id="skip-button">Skip</button>
+                        <button class="btn btn-primary btn-sm" id="submit-button">Submit</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <!-- Image Annotation Area -->
+                            <div class="annotation-container">
+                                <canvas id="annotation-canvas" class="annotation-canvas"></canvas>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <!-- Detection Details -->
+                            <h6>Original Detections</h6>
+                            <div id="original-detections"></div>
+                            
+                            <hr>
+                            
+                            <h6>Corrected Labels</h6>
+                            <div id="corrected-detections"></div>
+                            
+                            <hr>
+                            
+                            <!-- Annotation Form -->
+                            <form id="annotation-form">
+                                <div class="mb-3">
+                                    <label for="annotator-id" class="form-label">Annotator ID</label>
+                                    <input type="text" class="form-control" id="annotator-id" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="quality-score" class="form-label">Quality Score</label>
+                                    <select class="form-control" id="quality-score">
+                                        <option value="1.0">Excellent (1.0)</option>
+                                        <option value="0.8">Good (0.8)</option>
+                                        <option value="0.6">Fair (0.6)</option>
+                                        <option value="0.4">Poor (0.4)</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="notes" class="form-label">Notes (Optional)</label>
+                                    <textarea class="form-control" id="notes" rows="3"></textarea>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Welcome Message -->
+            <div id="welcome-panel" class="card">
+                <div class="card-body text-center">
+                    <h4>Welcome to the Hard Example Annotation Tool</h4>
+                    <p class="text-muted">Select an example from the left panel to start annotating.</p>
+                    <div class="mt-4">
+                        <h6>Instructions:</h6>
+                        <ul class="list-unstyled text-start" style="max-width: 600px; margin: 0 auto;">
+                            <li>• Click on examples in the left panel to load them</li>
+                            <li>• Review the original detections and their confidence scores</li>
+                            <li>• Correct any misclassifications or add missing labels</li>
+                            <li>• Submit your annotations to improve the model</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

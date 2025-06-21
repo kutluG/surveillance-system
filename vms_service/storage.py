@@ -67,7 +67,7 @@ class S3VideoStorage(VideoStorage):
                 Metadata=s3_metadata
             )
             
-            logger.info("Video clip stored", extra={event_id=event_id, key=key})
+            logger.info("Video clip stored", extra={"event_id": event_id, "key": key})
             return f"s3://{self.bucket_name}/{key}"
             
         except Exception as e:
@@ -93,7 +93,7 @@ class S3VideoStorage(VideoStorage):
                 ExpiresIn=expiry_minutes * 60
             )
             
-            logger.info("Generated presigned URL", extra={event_id=event_id, expiry_minutes=expiry_minutes})
+            logger.info("Generated presigned URL", extra={"event_id": event_id, "expiry_minutes": expiry_minutes})
             return url
             
         except Exception as e:
@@ -105,7 +105,7 @@ class S3VideoStorage(VideoStorage):
         try:
             key = f"clips/{event_id}.mp4"
             self.s3_client.delete_object(Bucket=self.bucket_name, Key=key)
-            logger.info("Video clip deleted", extra={event_id=event_id})
+            logger.info("Video clip deleted", extra={"event_id": event_id})
             return True
             
         except Exception as e:
@@ -187,7 +187,7 @@ class LocalVideoStorage(VideoStorage):
             with open(metadata_path, 'w') as f:
                 json.dump(metadata, f, default=str)
             
-            logger.info("Video clip stored locally", extra={event_id=event_id, path=filepath})
+            logger.info("Video clip stored locally", extra={"event_id": event_id, "path": filepath})
             return f"file://{filepath}"
             
         except Exception as e:
@@ -218,7 +218,7 @@ class LocalVideoStorage(VideoStorage):
             if os.path.exists(metadata_path):
                 os.remove(metadata_path)
             
-            logger.info("Video clip deleted locally", extra={event_id=event_id})
+            logger.info("Video clip deleted locally", extra={"event_id": event_id})
             return True
             
         except Exception as e:
@@ -276,7 +276,7 @@ class LocalVideoStorage(VideoStorage):
                     'duration_seconds': metadata.get('duration_seconds', 0),
                 })
             
-            logger.info("Listed local video clips", extra={count=len(clips}), camera_id=camera_id)
+            logger.info("Listed local video clips", extra={"count": len(clips), "camera_id": camera_id})
             return clips
             
         except Exception as e:
@@ -287,10 +287,17 @@ class LocalVideoStorage(VideoStorage):
 def get_storage() -> VideoStorage:
     """Get configured video storage backend."""
     storage_type = os.getenv("VIDEO_STORAGE_TYPE", "local")
+    use_encryption = os.getenv("ENABLE_ENCRYPTION", "true").lower() == "true"
     
-    if storage_type == "s3":
-        return S3VideoStorage()
-    elif storage_type == "local":
-        return LocalVideoStorage()
+    if use_encryption:
+        # Import here to avoid circular imports
+        from encrypted_storage import get_encrypted_storage
+        return get_encrypted_storage()
     else:
-        raise ValueError(f"Unknown storage type: {storage_type}")
+        # Legacy unencrypted storage
+        if storage_type == "s3":
+            return S3VideoStorage()
+        elif storage_type == "local":
+            return LocalVideoStorage()
+        else:
+            raise ValueError(f"Unknown storage type: {storage_type}")

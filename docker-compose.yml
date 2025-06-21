@@ -156,6 +156,7 @@ services:
       timeout: 10s
       retries: 5
   # =============================================================================
+  # APPLICATION SERVICES  # =============================================================================
   # APPLICATION SERVICES
   # =============================================================================
   
@@ -163,8 +164,12 @@ services:
     build:
       context: .
       dockerfile: edge_service/Dockerfile
+      args:
+        - MODEL_BASE_URL=${MODEL_BASE_URL:-https://raw.githubusercontent.com/opencv/opencv/master}
+        - DNN_MODEL_URL=${DNN_MODEL_URL:-https://github.com/opencv/opencv_3rdparty/raw/dnn_samples_face_detector_20170830/opencv_face_detector_uint8.pb}
     env_file:
-      - .env    environment:
+      - .env
+    environment:
       # Logging Configuration
       - SERVICE_NAME=edge_service
       - LOG_LEVEL=INFO
@@ -180,13 +185,14 @@ services:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
       # Face Anonymization Configuration
-      - ANONYMIZATION_ENABLED=true
-      - PRIVACY_LEVEL=moderate
-      - ANONYMIZATION_METHOD=blur
-      - FACE_MODEL_PATH=/app/models
-      - HAAR_CASCADE_PATH=/app/models/haarcascade_frontalface_default.xml
-      - DNN_PROTOTXT_PATH=/app/models/opencv_face_detector.pbtxt
-      - DNN_MODEL_PATH=/app/models/opencv_face_detector_uint8.pb
+      - EDGE_SERVICE_MODEL_BASE_URL=${MODEL_BASE_URL:-https://raw.githubusercontent.com/opencv/opencv/master}
+      - EDGE_SERVICE_ANONYMIZATION_ENABLED=true
+      - EDGE_SERVICE_PRIVACY_LEVEL=moderate
+      - EDGE_SERVICE_ANONYMIZATION_METHOD=blur
+      - EDGE_SERVICE_MODEL_DIR=/app/models
+      - EDGE_SERVICE_HAAR_CASCADE_PATH=/app/models/haarcascade_frontalface_default.xml
+      - EDGE_SERVICE_DNN_PROTOTXT_PATH=/app/models/opencv_face_detector.pbtxt
+      - EDGE_SERVICE_DNN_MODEL_PATH=/app/models/opencv_face_detector_uint8.pb
     ports:
       - "8001:8000"
     volumes:
@@ -615,14 +621,14 @@ services:
       - FACE_CONFIDENCE_THRESHOLD=0.5
       - PERSON_CONFIDENCE_THRESHOLD=0.6
       - VEHICLE_CONFIDENCE_THRESHOLD=0.4
-      - DEFAULT_CONFIDENCE_THRESHOLD=0.5
-    depends_on:
+      - DEFAULT_CONFIDENCE_THRESHOLD=0.5    depends_on:
       - kafka
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 5
+
   annotation_frontend:
     build:
       context: .
@@ -642,13 +648,25 @@ services:
       # Annotation Configuration
       - HARD_EXAMPLES_TOPIC=hard.examples
       - LABELED_EXAMPLES_TOPIC=labeled.examples
+      # Kafka Consumer Group Configuration for Load Balancing
+      - KAFKA_GROUP_ID=annotation-frontend-group
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      # Redis Configuration for Stateless Operation
+      - REDIS_URL=redis://redis:6379
     depends_on:
       - kafka
+      - redis
+      - postgres
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/readyz"]
       interval: 30s
       timeout: 10s
       retries: 5
+      start_period: 60s
+    # Scaling configuration - can be overridden with: docker-compose up --scale annotation_frontend=3
+    deploy:
+      mode: replicated
+      replicas: 1
 
   training_service:
     build:
@@ -718,9 +736,9 @@ services:
       context: .
       dockerfile: Dockerfile
     env_file:
-      - .env
-    ports:
-      - "8011:8011"    environment:
+      - .env    ports:
+      - "8011:8011"
+    environment:
       - SERVICE_NAME=data_subject_service
       - LOG_LEVEL=INFO
       # AWS Configuration for WORM Audit Logging

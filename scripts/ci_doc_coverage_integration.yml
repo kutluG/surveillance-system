@@ -1,0 +1,330 @@
+# ==============================================================================
+# CI/CD Configuration for Documentation Coverage Check
+# ==============================================================================
+# This file provides CI/CD integration snippets for various platforms to
+# integrate the documentation coverage check into the build pipeline.
+#
+# The coverage check ensures that all public functions and classes in the
+# edge_service codebase have proper PEP 257 compliant docstrings.
+
+# ==============================================================================
+# GitHub Actions Configuration
+# ==============================================================================
+# Add this job to your .github/workflows/ci.yml file
+
+documentation_coverage:
+  name: Documentation Coverage Check
+  runs-on: ubuntu-latest
+  
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        # Install only required packages for documentation analysis
+        pip install ast-tools
+    
+    - name: Run documentation coverage check
+      run: |
+        python scripts/doc_coverage_edge.py \
+          --threshold 95 \
+          --verbose \
+          --output doc_coverage_report.json \
+          --format json
+    
+    - name: Upload coverage report
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: documentation-coverage-report
+        path: doc_coverage_report.json
+    
+    - name: Comment on PR with coverage report
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const reportPath = 'doc_coverage_report.json';
+          
+          if (fs.existsSync(reportPath)) {
+            const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+            const coverage = report.summary.coverage_percentage.toFixed(1);
+            const missing = report.summary.missing_docstrings;
+            
+            let comment = `## 📚 Documentation Coverage Report\n\n`;
+            comment += `**Coverage:** ${coverage}% (${report.summary.documented_elements}/${report.summary.total_elements} elements documented)\n`;
+            comment += `**Missing Docstrings:** ${missing}\n\n`;
+            
+            if (missing > 0) {
+              comment += `### Missing Docstrings\n\n`;
+              const issuesByFile = {};
+              report.issues.forEach(issue => {
+                if (!issuesByFile[issue.file_path]) {
+                  issuesByFile[issue.file_path] = [];
+                }
+                issuesByFile[issue.file_path].push(issue);
+              });
+              
+              Object.keys(issuesByFile).sort().forEach(filePath => {
+                comment += `**${filePath}:**\n`;
+                issuesByFile[filePath].forEach(issue => {
+                  const name = issue.parent_class ? 
+                    `${issue.parent_class}.${issue.element_name}` : 
+                    issue.element_name;
+                  comment += `- Line ${issue.line_number}: ${issue.element_type} \`${name}\`\n`;
+                });
+                comment += `\n`;
+              });
+            }
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+          }
+
+# ==============================================================================
+# GitLab CI Configuration
+# ==============================================================================
+# Add this job to your .gitlab-ci.yml file
+
+documentation_coverage:
+  stage: test
+  image: python:3.9-slim
+  
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install ast-tools
+  
+  script:
+    - python scripts/doc_coverage_edge.py --threshold 95 --verbose --output doc_coverage_report.json --format json
+    - python scripts/doc_coverage_edge.py --threshold 95 --format text
+  
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: doc_coverage_report.json
+    paths:
+      - doc_coverage_report.json
+    expire_in: 1 week
+    when: always
+  
+  coverage: '/Coverage: (\d+\.?\d*)%/'
+  
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+# ==============================================================================
+# Jenkins Pipeline Configuration
+# ==============================================================================
+# Add this stage to your Jenkinsfile
+
+pipeline {
+    agent any
+    
+    stages {
+        stage('Documentation Coverage') {
+            steps {
+                script {
+                    // Run documentation coverage check
+                    sh '''
+                        python -m pip install --upgrade pip
+                        pip install ast-tools
+                        python scripts/doc_coverage_edge.py \
+                            --threshold 95 \
+                            --verbose \
+                            --output doc_coverage_report.json \
+                            --format json
+                    '''
+                    
+                    // Parse and display results
+                    def reportJson = readJSON file: 'doc_coverage_report.json'
+                    def coverage = reportJson.summary.coverage_percentage
+                    def missing = reportJson.summary.missing_docstrings
+                    
+                    echo "Documentation Coverage: ${coverage}%"
+                    echo "Missing Docstrings: ${missing}"
+                    
+                    // Publish results
+                    publishHTML([
+                        allowMissing: false,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
+                        reportDir: '.',
+                        reportFiles: 'doc_coverage_report.json',
+                        reportName: 'Documentation Coverage Report'
+                    ])
+                    
+                    // Set build status based on coverage
+                    if (coverage < 95) {
+                        currentBuild.result = 'UNSTABLE'
+                        error("Documentation coverage (${coverage}%) is below threshold (95%)")
+                    }
+                }
+            }
+            
+            post {
+                always {
+                    archiveArtifacts artifacts: 'doc_coverage_report.json', fingerprint: true
+                }
+            }
+        }
+    }
+}
+
+# ==============================================================================
+# Azure DevOps Pipeline Configuration
+# ==============================================================================
+# Add this task to your azure-pipelines.yml file
+
+- task: UsePythonVersion@0
+  displayName: 'Set up Python'
+  inputs:
+    versionSpec: '3.9'
+    
+- script: |
+    python -m pip install --upgrade pip
+    pip install ast-tools
+  displayName: 'Install dependencies'
+
+- script: |
+    python scripts/doc_coverage_edge.py \
+      --threshold 95 \
+      --verbose \
+      --output $(Agent.TempDirectory)/doc_coverage_report.json \
+      --format json
+  displayName: 'Run documentation coverage check'
+  continueOnError: true
+
+- task: PublishTestResults@2
+  displayName: 'Publish documentation coverage results'
+  inputs:
+    testResultsFormat: 'JUnit'
+    testResultsFiles: '$(Agent.TempDirectory)/doc_coverage_report.json'
+    testRunTitle: 'Documentation Coverage'
+  condition: always()
+
+# ==============================================================================
+# Docker-based CI Configuration
+# ==============================================================================
+# For use in any CI system that supports Docker
+
+# Create a simple documentation check container
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Install dependencies
+RUN pip install ast-tools
+
+# Copy source code
+COPY . .
+
+# Run documentation coverage check
+RUN python scripts/doc_coverage_edge.py \
+    --threshold 95 \
+    --verbose \
+    --format text
+
+# ==============================================================================
+# Makefile Integration
+# ==============================================================================
+# Add these targets to your Makefile
+
+.PHONY: doc-coverage doc-coverage-json doc-coverage-report
+
+doc-coverage:
+	@echo "Running documentation coverage check..."
+	@python scripts/doc_coverage_edge.py --threshold 95 --verbose
+
+doc-coverage-json:
+	@echo "Generating JSON documentation coverage report..."
+	@python scripts/doc_coverage_edge.py \
+		--threshold 95 \
+		--format json \
+		--output doc_coverage_report.json
+
+doc-coverage-report: doc-coverage-json
+	@echo "Documentation coverage report generated: doc_coverage_report.json"
+	@python -c "import json; r=json.load(open('doc_coverage_report.json')); print(f'Coverage: {r[\"summary\"][\"coverage_percentage\"]:.1f}%')"
+
+# ==============================================================================
+# Pre-commit Hook Configuration
+# ==============================================================================
+# Add this to your .pre-commit-config.yaml file
+
+repos:
+  - repo: local
+    hooks:
+      - id: documentation-coverage
+        name: Documentation Coverage Check
+        entry: python scripts/doc_coverage_edge.py --threshold 95
+        language: python
+        files: ^edge_service/.*\.py$
+        pass_filenames: false
+        additional_dependencies: [ast-tools]
+
+# ==============================================================================
+# VS Code Tasks Configuration
+# ==============================================================================
+# Add this to your .vscode/tasks.json file
+
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Documentation Coverage Check",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "scripts/doc_coverage_edge.py",
+                "--threshold",
+                "95",
+                "--verbose"
+            ],
+            "group": {
+                "kind": "test",
+                "isDefault": false
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        }
+    ]
+}
+
+# ==============================================================================
+# Usage Examples
+# ==============================================================================
+
+# Basic usage
+python scripts/doc_coverage_edge.py
+
+# With custom threshold
+python scripts/doc_coverage_edge.py --threshold 90
+
+# Generate JSON report
+python scripts/doc_coverage_edge.py --format json --output coverage.json
+
+# Verbose mode with custom path
+python scripts/doc_coverage_edge.py --verbose --edge-service-path ./edge_service
+
+# CI-friendly usage (exits with code 1 if below threshold)
+python scripts/doc_coverage_edge.py --threshold 95 || exit 1
