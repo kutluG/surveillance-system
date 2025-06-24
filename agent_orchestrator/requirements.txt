@@ -28,7 +28,7 @@ opentelemetry-exporter-prometheus==1.12.0rc1
 opentelemetry-instrumentation-fastapi==0.42b0
 opentelemetry-instrumentation-requests==0.42b0
 opentelemetry-instrumentation-aiohttp-client==0.42b0
-grafana-client==3.5.0
+grafana-client==4.3.2
 
 # Enhanced security dependencies
 passlib[bcrypt]==1.7.4
