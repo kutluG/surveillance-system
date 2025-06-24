@@ -13,7 +13,7 @@ numpy==1.24.3
 paho-mqtt==1.6.1
 
 # Kafka for hard example publishing
-kafka-python==2.0.2
+kafka-python==2.2.13
 confluent-kafka==2.3.0
 
 # Monitoring and metrics
