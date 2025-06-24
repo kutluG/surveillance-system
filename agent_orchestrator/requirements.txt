@@ -16,7 +16,7 @@ pybreaker==1.0.2
 confluent-kafka==2.3.0
 
 # Semantic matching dependencies
-sentence-transformers==2.2.2
+sentence-transformers==4.1.0
 scikit-learn==1.3.2
 numpy==1.24.4
 
